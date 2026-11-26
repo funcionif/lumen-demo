@@ -354,7 +354,22 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
             }
-            #btn-lumen-demo-drawer-cta {
+            #lumen-demo-profile-card {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
+                margin: 0 0 2px 0;
+                padding: 11px 14px;
+                border-radius: 16px;
+                background: color-mix(in srgb, var(--accent) 8%, var(--card-inner-bg));
+                border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-color));
+                box-sizing: border-box;
+                width: 100%;
+                flex-shrink: 0;
+            }
+            #btn-lumen-demo-drawer-cta,
+            #btn-lumen-demo-profile-cta {
                 background: color-mix(in srgb, var(--accent) 14%, var(--card-bg));
                 color: var(--accent);
                 border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
@@ -445,6 +460,23 @@
                 <a id="btn-lumen-demo-drawer-cta" href="${PLAY_STORE_URL}" target="_blank" rel="noopener noreferrer">Obtener App</a>
             `;
             drawerScrollEl.prepend(drawerCard);
+        }
+
+        const profileMainViewEl = document.getElementById('profile-main-view');
+        if (profileMainViewEl && !document.getElementById('lumen-demo-profile-card')) {
+            const profileCard = document.createElement('div');
+            profileCard.id = 'lumen-demo-profile-card';
+            profileCard.innerHTML = `
+                <div class="lumen-demo-drawer-left">
+                    <span class="lumen-demo-dot"></span>
+                    <div style="min-width:0;">
+                        <span class="lumen-demo-drawer-title">Perfil en Modo Demo</span>
+                        <span class="lumen-demo-drawer-sub">Un solo pago de por vida</span>
+                    </div>
+                </div>
+                <a id="btn-lumen-demo-profile-cta" href="${PLAY_STORE_URL}" target="_blank" rel="noopener noreferrer">Obtener App</a>
+            `;
+            profileMainViewEl.prepend(profileCard);
         }
 
         document.getElementById('btn-lumen-demo-reset')?.addEventListener('click', () => {
