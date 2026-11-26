@@ -14064,18 +14064,16 @@ const renderCreditCompareResults = () => {
 // ==========================================
 // MODULO 15: RESPALDO CIFRADO (.LUMEN / .JSON), CIERRE DE ANO Y PREFERENCIAS DE PERFIL
 // ==========================================
-document.getElementById('import-file-input')?.setAttribute('accept', '.lumen,.json,application/json');
-
+document.getElementById('import-file-input')?.removeAttribute('accept');
 document.getElementById('btn-export-data')?.addEventListener('click', async () => {
     if (typeof window.runLumenEncryptedExport === 'function') {
         await window.runLumenEncryptedExport();
     }
 });
-
 document.getElementById('btn-import-trigger')?.addEventListener('click', () => {
     const inp = document.getElementById('import-file-input');
     if (inp) {
-        inp.setAttribute('accept', '.lumen,.json,application/json');
+        inp.removeAttribute('accept');
         inp.click();
     }
 });
@@ -18046,7 +18044,7 @@ const injectAccountantPackageCard = () => {
                 <span>.CSV sin cifrar</span>
             </button>
         </div>
-        <input type="file" id="input-unlock-accountant-csv" accept=".lumen-csv,.json,.txt" class="hidden">
+        <input type="file" id="input-unlock-accountant-csv" class="hidden">
 
         <small style="display:block; margin-top:8px; font-size:10px; color:var(--text-muted); line-height:1.38;">
             Incluye automáticamente movimientos cerrados de ${activeYear} (incluso si ya los archivaste en IndexedDB).
