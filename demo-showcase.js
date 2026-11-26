@@ -161,13 +161,13 @@
 
     // 4. MODAL DE INVITACIÓN A GOOGLE PLAY PARA FUNCIONES EXCLUSIVAS DE LA APP NATIVA
     const openDemoPlayPrompt = (featureLabel) => {
-        const title = 'Disponible en Lumen Completo';
-        const message = `Estás explorando el <b>Modo Demo Interactivo</b> con datos ficticios que se reinician al recargar.<br><br>La función <b>${featureLabel}</b> y el guardado cifrado permanente en tu teléfono están incluidos en <b>Lumen Vitalicio</b> (pago único, sin mensualidades).`;
+        const title = 'Disponible en la App Lumen';
+        const message = `Estás probando la demo web con datos ficticios que se reinician al recargar.<br><br>La función <b>${featureLabel}</b> y el guardado cifrado en tu teléfono están incluidos en la <b>App Lumen</b> (<b>un solo pago de por vida</b>, sin suscripciones ni mensualidades).`;
 
         if (typeof window.openBentoConfirmModal === 'function') {
             window.openBentoConfirmModal({
                 title,
-                subtitle: 'Demo interactiva • Solo lectura temporal',
+                subtitle: 'Modo Demo • Datos temporales de prueba',
                 message,
                 confirmText: PLAY_STORE_CTA_TEXT,
                 cancelText: 'Seguir probando',
