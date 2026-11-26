@@ -1,5 +1,5 @@
 // ============================================================================
-// LUMEN - MODO VITRINA / DEMO INTERACTIVA WEB (v2.2.3)
+// LUMEN - MODO VITRINA / DEMO INTERACTIVA WEB (v2.2.5)
 // Cargar SOLO en el sitio web de demostración, justo después de demo-data.js
 // y ANTES de security.js y core.js. NUNCA incluir en la compilación Android.
 // ============================================================================
@@ -34,6 +34,8 @@
     const seedRamStore = () => {
         ramStore.clear();
         const demoVersion = String(bundle.version || '2.2.3');
+        const currMonthId = getCurrMonthId();
+
         ramStore.set('myFinances', JSON.stringify(bundle.finances || {}));
         if (bundle.salary) ramStore.set('myFinancesSalary', JSON.stringify(bundle.salary));
         if (bundle.taxParams) ramStore.set('myFinancesTaxParams', JSON.stringify(bundle.taxParams));
@@ -52,9 +54,9 @@
         ramStore.set('myFinancesTheme', bundle.theme || 'lumen');
         ramStore.set('myFinancesColorMode', bundle.colorMode || 'auto');
 
-        // Aterrizar directo en el Dashboard sin popups automáticos al abrir la página
-        // (El banner "Cierre de Octubre listo" sigue visible en el inicio por si quieren abrirlo)
-        ramStore.set('myFinancesAutoRecapSeenMonth', getCurrMonthId());
+        // Aterrizar directo en el Dashboard sin popups ni banners de cierre/sobrante
+        ramStore.set('myFinancesAutoRecapSeenMonth', currMonthId);
+        ramStore.set('myFinancesRecapDismissedMonth', currMonthId);
         ramStore.set('myFinancesLastSeenVersion', demoVersion);
         ramStore.set('lumenRebrandSeen_v1', 'true');
         ramStore.set('myFinancesBioBannerSeen', 'true');
@@ -136,17 +138,25 @@
             .catch(() => {});
     }
 
-    // 3. RESPONDER ARCHIVO HISTÓRICO 2025 DESDE RAM (para probar Buscador IndexedDB sin escribir en disco)
+    // 3. HOOKS DE DEMO: ARCHIVO 2025 EN RAM + RETIRAR BANNERS DE SOBRANTE Y CIERRE
     const demoArchived2025 = Array.isArray(bundle.archivedTransactions) ? bundle.archivedTransactions : [];
-    const bindArchivedDemoHook = () => {
-        if (demoArchived2025.length === 0) return;
-        window.getArchivedTransactions = async (targetYear = null) => {
-            if (!targetYear) return demoArchived2025.map((t) => ({ ...t }));
-            const prefix = `${targetYear}-`;
-            return demoArchived2025
-                .filter((t) => String(t.monthId || '').startsWith(prefix))
-                .map((t) => ({ ...t }));
+    const applyDemoRuntimeHooks = () => {
+        if (demoArchived2025.length > 0) {
+            window.getArchivedTransactions = async (targetYear = null) => {
+                if (!targetYear) return demoArchived2025.map((t) => ({ ...t }));
+                const prefix = `${targetYear}-`;
+                return demoArchived2025
+                    .filter((t) => String(t.monthId || '').startsWith(prefix))
+                    .map((t) => ({ ...t }));
+            };
+        }
+
+        // Retirar "Sobrante de Octubre disponible" y "Cierre de Octubre listo" en la demo
+        window.renderUnassignedSurplusBanner = () => {
+            document.getElementById('unassigned-surplus-banner')?.remove();
         };
+        document.getElementById('unassigned-surplus-banner')?.remove();
+        document.getElementById('proactive-recap-banner')?.remove();
     };
 
     // 4. MODAL DE INVITACIÓN A GOOGLE PLAY PARA FUNCIONES EXCLUSIVAS DE LA APP NATIVA
@@ -171,9 +181,9 @@
         }
     };
 
-    // 5. TARJETA INTEGRADA EN EL FLUJO DEL INICIO (cero superposición sobre cabecera ni modales)
+    // 5. BARRA FIJA JUSTO DEBAJO DE LA CABECERA (z-index 890: siempre debajo de modales y menú lateral)
     const mountDemoShowcaseUI = () => {
-        bindArchivedDemoHook();
+        applyDemoRuntimeHooks();
 
         // Ocultar overlays promocionales secundarios que distraen en la demo
         ['lumi-release-banner-overlay', 'bio-update-modal', 'gmf-welcome-modal', 'lumen-update-modal'].forEach((id) => {
@@ -185,23 +195,34 @@
         const styleEl = document.createElement('style');
         styleEl.id = 'lumen-demo-showcase-style';
         styleEl.textContent = `
+            /* Reservar "Sobrante" y "Cierre de mes" como sorpresa de la app completa */
+            #unassigned-surplus-banner,
+            #proactive-recap-banner {
+                display: none !important;
+            }
+
             #lumen-demo-showcase-bar {
-                position: relative;
-                z-index: 1;
+                position: fixed;
+                top: var(--lumen-demo-top, 106px);
+                left: 0;
+                right: 0;
+                z-index: 890;
+                background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+                color: #f8fafc;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+                box-shadow: 0 6px 18px rgba(15, 23, 42, 0.16);
+                font-family: inherit;
+                box-sizing: border-box;
+                padding: 8px 14px;
+            }
+            .lumen-demo-inner {
+                width: 100%;
+                max-width: 600px;
+                margin: 0 auto;
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
                 gap: 10px;
-                margin: 0 0 12px 0;
-                padding: 10px 12px;
-                border-radius: 16px;
-                background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-                color: #f8fafc;
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
-                font-family: inherit;
-                box-sizing: border-box;
-                width: 100%;
             }
             .lumen-demo-left {
                 display: flex;
@@ -222,7 +243,7 @@
                 display: flex;
                 flex-direction: column;
                 min-width: 0;
-                line-height: 1.2;
+                line-height: 1.18;
             }
             .lumen-demo-title {
                 font-size: 12px;
@@ -251,7 +272,7 @@
                 color: #e2e8f0;
                 border: 1px solid rgba(255, 255, 255, 0.16);
                 border-radius: 999px;
-                padding: 6px 10px;
+                padding: 5px 10px;
                 font-size: 11px;
                 font-weight: 700;
                 cursor: pointer;
@@ -269,33 +290,82 @@
                 white-space: nowrap;
                 box-shadow: 0 4px 12px rgba(0, 196, 159, 0.3);
             }
+            #lumen-demo-spacer {
+                width: 100%;
+                height: var(--lumen-demo-spacer-h, 52px);
+                pointer-events: none;
+                flex-shrink: 0;
+            }
+            /* Desplazar "Volver arriba" exactamente debajo de la barra fija de demo */
+            #lumen-scroll-top-btn {
+                margin-top: var(--lumen-demo-spacer-h, 52px);
+            }
+            body.app-locked #lumen-demo-showcase-bar {
+                visibility: hidden !important;
+                pointer-events: none !important;
+            }
         `;
         document.head.appendChild(styleEl);
 
         const bar = document.createElement('div');
         bar.id = 'lumen-demo-showcase-bar';
         bar.setAttribute('role', 'region');
-        bar.setAttribute('aria-label', 'Barra de demostración interactiva');
+        bar.setAttribute('aria-label', 'Barra fija de demostración interactiva');
         bar.innerHTML = `
-            <div class="lumen-demo-left">
-                <span class="lumen-demo-dot"></span>
-                <div class="lumen-demo-copy">
-                    <span class="lumen-demo-title">Modo Demo</span>
-                    <span class="lumen-demo-sub">Datos ficticios 2026</span>
+            <div class="lumen-demo-inner">
+                <div class="lumen-demo-left">
+                    <span class="lumen-demo-dot"></span>
+                    <div class="lumen-demo-copy">
+                        <span class="lumen-demo-title">Modo Demo</span>
+                        <span class="lumen-demo-sub">Datos ficticios 2026</span>
+                    </div>
+                </div>
+                <div class="lumen-demo-actions">
+                    <button type="button" id="btn-lumen-demo-reset" title="Restaurar datos de prueba">Reiniciar</button>
+                    <a id="btn-lumen-demo-cta" href="${PLAY_STORE_URL}" target="_blank" rel="noopener noreferrer">Obtener App</a>
                 </div>
             </div>
-            <div class="lumen-demo-actions">
-                <button type="button" id="btn-lumen-demo-reset" title="Restaurar datos de prueba">Reiniciar</button>
-                <a id="btn-lumen-demo-cta" href="${PLAY_STORE_URL}" target="_blank" rel="noopener noreferrer">Obtener App</a>
-            </div>
         `;
+        document.body.appendChild(bar);
 
-        // Insertar dentro de <main> (debajo de la cabecera fija y detrás de cualquier modal)
-        const mainEl = document.querySelector('main');
-        if (mainEl) {
-            mainEl.prepend(bar);
+        // Espaciador en el flujo normal para que la barra fija no tape las tarjetas de inicio
+        const spacer = document.createElement('div');
+        spacer.id = 'lumen-demo-spacer';
+        spacer.setAttribute('aria-hidden', 'true');
+        const headerEl = document.querySelector('header');
+        if (headerEl && headerEl.parentNode) {
+            headerEl.insertAdjacentElement('afterend', spacer);
         } else {
-            document.body.prepend(bar);
+            document.body.prepend(spacer);
+        }
+
+        // Sincronizar posición exacta con el borde inferior real de .top-bar (iOS notch / Android / Desktop)
+        const syncDemoBarMetrics = () => {
+            const topBar = document.querySelector('.top-bar');
+            if (topBar) {
+                const rect = topBar.getBoundingClientRect();
+                if (rect.height > 0) {
+                    document.documentElement.style.setProperty('--lumen-demo-top', `${Math.round(rect.bottom)}px`);
+                }
+            }
+            const barRect = bar.getBoundingClientRect();
+            if (barRect.height > 0) {
+                document.documentElement.style.setProperty('--lumen-demo-spacer-h', `${Math.round(barRect.height + 6)}px`);
+            }
+        };
+
+        syncDemoBarMetrics();
+        requestAnimationFrame(syncDemoBarMetrics);
+        setTimeout(syncDemoBarMetrics, 150);
+        setTimeout(syncDemoBarMetrics, 500);
+        window.addEventListener('resize', syncDemoBarMetrics, { passive: true });
+        window.addEventListener('orientationchange', () => setTimeout(syncDemoBarMetrics, 120), { passive: true });
+
+        if (typeof ResizeObserver === 'function') {
+            const ro = new ResizeObserver(syncDemoBarMetrics);
+            const topBarEl = document.querySelector('.top-bar');
+            if (topBarEl) ro.observe(topBarEl);
+            ro.observe(bar);
         }
 
         document.getElementById('btn-lumen-demo-reset')?.addEventListener('click', () => {
@@ -337,10 +407,12 @@
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
             mountDemoShowcaseUI();
-            setTimeout(bindArchivedDemoHook, 250);
+            setTimeout(applyDemoRuntimeHooks, 150);
+            setTimeout(applyDemoRuntimeHooks, 500);
         });
     } else {
         mountDemoShowcaseUI();
-        setTimeout(bindArchivedDemoHook, 250);
+        setTimeout(applyDemoRuntimeHooks, 150);
+        setTimeout(applyDemoRuntimeHooks, 500);
     }
 })();
