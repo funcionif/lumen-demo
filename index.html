@@ -40,7 +40,6 @@
     <script src="demo-data.js?v=2.2.11"></script>
     <script src="demo-showcase.js?v=2.2.11"></script>
     <script src="security.js?v=2.2.11"></script>
-    <script src="security.js?v=2.2.3"></script>
 </head>
 <body class="app-locked">
     <!-- TOAST DE ACTUALIZACIÓN PWA -->
@@ -2443,6 +2442,47 @@
                                 <div id="new-account-gmf-hint" style="margin-bottom:8px;"></div>
                             </div>
 
+                            <div id="new-account-mgmt-box" style="margin-bottom:12px;">
+                                <div class="switch-row" style="margin-bottom:8px;">
+                                    <div>
+                                        <strong>Cuota de manejo (Opcional)</strong>
+                                        <small>Cobro mensual en cuenta de ahorros o corriente</small>
+                                    </div>
+                                    <label class="switch"><input type="checkbox" id="new-account-has-mgmt-fee"><span class="slider"></span></label>
+                                </div>
+                                <div id="new-account-mgmt-fields" class="hidden" style="background:var(--card-inner-bg); border:1px solid var(--border-color); border-radius:14px; padding:10px 12px;">
+                                    <div class="form-row" style="margin-bottom:8px;">
+                                        <div class="form-group" style="margin-bottom:0;">
+                                            <label style="font-size:10.5px;">Valor cuota ($)</label>
+                                            <input type="text" id="new-account-mgmt-fee" class="money-input" inputmode="decimal" placeholder="Ej. 16.900">
+                                        </div>
+                                        <div class="form-group" style="margin-bottom:0;">
+                                            <label style="font-size:10.5px;">Día de corte/cobro (1-31)</label>
+                                            <input type="number" id="new-account-mgmt-day" min="1" max="31" value="15">
+                                        </div>
+                                    </div>
+                                    <div class="form-group" style="margin-bottom:8px;">
+                                        <label style="font-size:10.5px;">Exoneración bancaria (Opcional)</label>
+                                        <select id="new-account-mgmt-waiver-type">
+                                            <option value="none">Sin exoneración (siempre cobra)</option>
+                                            <option value="min_balance">Exonerar si el saldo es ≥ monto</option>
+                                            <option value="monthly_income">Exonerar si ingresan ≥ monto al mes</option>
+                                        </select>
+                                    </div>
+                                    <div id="new-account-mgmt-waiver-box" class="form-group hidden" style="margin-bottom:8px;">
+                                        <label id="new-account-mgmt-waiver-label" style="font-size:10.5px;">Monto mínimo para exonerar ($)</label>
+                                        <input type="text" id="new-account-mgmt-waiver-amt" class="money-input" inputmode="decimal" placeholder="Ej. 2.000.000">
+                                    </div>
+                                    <div class="switch-row" style="margin-bottom:0;">
+                                        <div>
+                                            <strong style="font-size:12px;">Descontar automáticamente</strong>
+                                            <small>Debita la cuota al llegar el día de cobro</small>
+                                        </div>
+                                        <label class="switch"><input type="checkbox" id="new-account-mgmt-auto" checked><span class="slider"></span></label>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div class="switch-row" style="margin-bottom:8px;">
                                 <div>
                                     <strong>Incluir en Liquidez Total</strong>
@@ -3007,6 +3047,49 @@
                             <label class="switch"><input type="checkbox" id="edit-account-gmf-exempt"><span class="slider"></span></label>
                         </div>
                         <div id="edit-account-gmf-usage-hint" style="margin-bottom:14px;"></div>
+
+                        <div id="edit-account-mgmt-section" class="hidden" style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border-color);">
+                            <div class="switch-row" style="margin-bottom:8px;">
+                                <div>
+                                    <strong>Cuota de manejo (Opcional)</strong>
+                                    <small>Descuento periódico de cuenta bancaria</small>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="edit-account-has-mgmt-fee"><span class="slider"></span></label>
+                            </div>
+                            <div id="edit-account-mgmt-fields" class="hidden" style="background:var(--card-inner-bg); border:1px solid var(--border-color); border-radius:14px; padding:11px 12px; margin-bottom:8px;">
+                                <div class="form-row" style="margin-bottom:8px;">
+                                    <div class="form-group" style="margin-bottom:0;">
+                                        <label style="font-size:10.5px;">Valor cuota ($)</label>
+                                        <input type="text" id="edit-account-mgmt-fee" class="money-input" inputmode="decimal" placeholder="Ej. 16.900">
+                                    </div>
+                                    <div class="form-group" style="margin-bottom:0;">
+                                        <label style="font-size:10.5px;">Día de corte/cobro (1-31)</label>
+                                        <input type="number" id="edit-account-mgmt-day" min="1" max="31" value="15">
+                                    </div>
+                                </div>
+                                <div class="form-group" style="margin-bottom:8px;">
+                                    <label style="font-size:10.5px;">Exoneración bancaria (Opcional)</label>
+                                    <select id="edit-account-mgmt-waiver-type">
+                                        <option value="none">Sin exoneración (siempre cobra)</option>
+                                        <option value="min_balance">Exonerar si el saldo es ≥ monto</option>
+                                        <option value="monthly_income">Exonerar si ingresan ≥ monto al mes</option>
+                                    </select>
+                                </div>
+                                <div id="edit-account-mgmt-waiver-box" class="form-group hidden" style="margin-bottom:8px;">
+                                    <label id="edit-account-mgmt-waiver-label" style="font-size:10.5px;">Monto mínimo para exonerar ($)</label>
+                                    <input type="text" id="edit-account-mgmt-waiver-amt" class="money-input" inputmode="decimal" placeholder="Ej. 2.000.000">
+                                </div>
+                                <div class="switch-row" style="margin-bottom:10px;">
+                                    <div>
+                                        <strong style="font-size:12px;">Descontar automáticamente</strong>
+                                        <small>Debita la cuota al llegar el día de cobro</small>
+                                    </div>
+                                    <label class="switch"><input type="checkbox" id="edit-account-mgmt-auto" checked><span class="slider"></span></label>
+                                </div>
+                                <button type="button" id="btn-save-account-mgmt-fee" class="btn btn-primary" style="width:100%; padding:10px; font-size:12.5px;">Guardar cuota de manejo</button>
+                                <div id="edit-account-mgmt-status-box" style="margin-top:10px;"></div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="switch-row" style="margin-top:10px; margin-bottom:8px;">

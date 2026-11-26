@@ -1618,6 +1618,34 @@ const computeUpcoming7DaysCommitments = (refDate = currentDate) => {
         });
     });
 
+    // 3B. Cuotas de manejo de cuentas de ahorros / corriente (-5 a +7 días)
+    if (typeof evaluateAccountMgmtFeeCycle === 'function') {
+        const nextMonthDate = new Date(startDay.getFullYear(), startDay.getMonth() + 1, 1);
+        const monthsToCheck = [currMonthId, getMonthId(nextMonthDate)];
+        (financeData.customAccounts || []).filter(a => isAccountMgmtFeeEligible(a) && a.hasMgmtFee).forEach(acc => {
+            for (const mId of monthsToCheck) {
+                const st = evaluateAccountMgmtFeeCycle(acc, mId, snap, startDay);
+                if (!st.enabled || st.status !== 'pending' || !st.dueDate) continue;
+                const diff = calcDiffDays(st.dueDate);
+                if (diff >= -5 && diff <= 7) {
+                    items.push({
+                        uid: `accmgmt_${acc.id}_${mId}`,
+                        kind: 'acc_mgmt_fee',
+                        refId: String(acc.id),
+                        monthId: mId,
+                        title: `Manejo ${stripLeadingEmoji(acc.name)}`,
+                        subtitle: `${fmtShortDate(st.dueDate)} • ${st.insufficientFunds ? 'Saldo insuficiente' : 'Cuota de manejo'}`,
+                        amount: st.amount,
+                        diffDays: diff,
+                        icon: 'bank',
+                        actionLabel: 'Cobrar'
+                    });
+                    break;
+                }
+            }
+        });
+    }
+
     // 4. Gastos programados (status === 'pending')
     (financeData.transactions || []).filter(t => !t.isDeleted && t.status === 'pending' && t.type === 'expense').forEach(tx => {
         const txDate = getTxEffectiveDateObj(tx, startDay);
@@ -2049,7 +2077,7 @@ const getGmfAccountInfo = (acc, customParams = null) => {
 const getMonthlyGmfUsedOutflows = (accountId, monthId, excludeTxId = null) => {
     let used = 0;
     (financeData.transactions || []).forEach(t => {
-        if (t.isDeleted || t.isAdjustment || t.isGmfTax) return;
+        if (t.isDeleted || t.isAdjustment || t.isGmfTax || t.isAccountMgmtFee) return;
         if (t.isSharedTrip && t.paidBy === 'companion') return;
         if (excludeTxId && String(t.id) === String(excludeTxId)) return;
         if (getTxMonthId(t) !== monthId || !isTxClosed(t)) return;
@@ -6011,9 +6039,27 @@ const computeSafeToSpendToday = (monthId, currSnap) => {
         }
     });
 
-    const obligations = round2(pendingExp + budgetRemaining + monthlyDebtPayments + unbudgetedRecurringDue);
+    let unpaidAccountMgmtFees = 0;
+    if (typeof evaluateAccountMgmtFeeCycle === 'function') {
+        const feeCatObj = (financeData.categories?.expense || []).find(c => /cuotas\s*\/\s*intereses/i.test(stripLeadingEmoji(c.name)));
+        const feeCatBudgeted = feeCatObj ? getCategoryLimitForMonth(feeCatObj, mIdx, mYear) > 0 : false;
+        if (!feeCatBudgeted) {
+            (financeData.customAccounts || []).filter(a => isAccountMgmtFeeEligible(a) && a.hasMgmtFee).forEach(acc => {
+                const hasManualSub = (financeData.subscriptions || []).some(s =>
+                    s.status === 'active' && String(s.accountId) === String(acc.id) && /manejo/i.test(s.name || '')
+                );
+                if (hasManualSub) return;
+                const st = evaluateAccountMgmtFeeCycle(acc, monthId, currSnap, currentDate);
+                if (st.enabled && st.status === 'pending' && st.amount > 0) {
+                    unpaidAccountMgmtFees = round2(unpaidAccountMgmtFees + st.amount);
+                }
+            });
+        }
+    }
+
+    const obligations = round2(pendingExp + budgetRemaining + monthlyDebtPayments + unbudgetedRecurringDue + unpaidAccountMgmtFees);
     const safeToSpend = Math.max(0, round2(liquidAssets - obligations));
-    return { liquidAssets, pendingExp, budgetRemaining, monthlyDebtPayments, unbudgetedRecurringDue, obligations, safeToSpend };
+    return { liquidAssets, pendingExp, budgetRemaining, monthlyDebtPayments, unbudgetedRecurringDue, unpaidAccountMgmtFees, obligations, safeToSpend };
 };
 
 // B. Mapa de Calor del Calendario
@@ -6436,6 +6482,15 @@ const computeCashProjectionData = (horizon = 'eom') => {
                 pushEvent(dueDt, 'expense', st.remainingQuota, `Cuota ${stripLeadingEmoji(d.name)}`);
             }
         });
+
+        if (typeof evaluateAccountMgmtFeeCycle === 'function') {
+            financeData.customAccounts.filter(a => isAccountMgmtFeeEligible(a) && a.hasMgmtFee && a.excludeFromLiquidity !== true).forEach(acc => {
+                const st = evaluateAccountMgmtFeeCycle(acc, mId, currSnap, today);
+                if (st.enabled && st.status === 'pending' && st.dueDate && st.amount > 0) {
+                    pushEvent(st.dueDate, 'expense', st.amount, `Cuota manejo ${stripLeadingEmoji(acc.name)}`);
+                }
+            });
+        }
 
         iter.setMonth(iter.getMonth() + 1);
     }
@@ -7757,6 +7812,167 @@ const decryptTextPayloadAesGcm = async (rawEnvelopeText, password) => {
     } catch {
         throw new Error('Contraseña incorrecta o archivo dañado.');
     }
+};
+
+// ==========================================
+// MOTOR DE CUOTA DE MANEJO EN CUENTAS BANCARIAS (AHORROS / CORRIENTE)
+// ==========================================
+const isAccountMgmtFeeEligible = (acc) => {
+    if (!acc || acc.category !== 'asset' || acc.id === 'Efectivo' || String(acc.id).startsWith('CxC_')) return false;
+    const sub = acc.accountSubType || 'savings';
+    return sub === 'savings' || sub === 'checking';
+};
+
+const getAccountMgmtFeeDueDate = (acc, year, monthIndex) => {
+    const rawDay = Math.max(1, Math.min(31, parseInt(acc?.mgmtFeeDay, 10) || 15));
+    const maxDay = new Date(year, monthIndex + 1, 0).getDate();
+    return new Date(year, monthIndex, Math.min(rawDay, maxDay), 12, 0, 0);
+};
+
+const evaluateAccountMgmtFeeCycle = (acc, monthId, currSnap = null, refDate = currentDate) => {
+    if (!isAccountMgmtFeeEligible(acc) || !acc.hasMgmtFee || round2(acc.mgmtFee || 0) <= 0) {
+        return { enabled: false, status: 'disabled', amount: 0, day: 15, dueDate: null, dueDateStr: '', waived: false, waiverLabel: '', insufficientFunds: false };
+    }
+
+    const [yStr, mStr] = String(monthId || getMonthId(refDate)).split('-');
+    const y = parseInt(yStr, 10) || refDate.getFullYear();
+    const mIdx = (parseInt(mStr, 10) || (refDate.getMonth() + 1)) - 1;
+    const amount = round2(acc.mgmtFee || 0);
+    const dueDate = getAccountMgmtFeeDueDate(acc, y, mIdx);
+    const dueDateStr = dueDate.toLocaleDateString('en-CA');
+    const todayStr = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate()).toLocaleDateString('en-CA');
+    const snap = currSnap || computeBalancesUpTo(monthId);
+    const balance = round2(snap.bals?.[acc.id] || 0);
+    const autoCharge = acc.mgmtFeeAutoCharge !== false;
+    const isDueOrPast = dueDateStr <= todayStr;
+    const isBeforeConfig = !!(acc.mgmtFeeConfiguredAt && dueDateStr < acc.mgmtFeeConfiguredAt);
+
+    // 1. Verificar si ya fue cobrada (activa) o enviada a la Papelera
+    const existingActive = (financeData.transactions || []).find(t =>
+        !t.isDeleted && t.isAccountMgmtFee && String(t.mgmtFeeAccountId) === String(acc.id) && t.mgmtFeeMonthId === monthId
+    );
+    if (existingActive) {
+        return { enabled: true, status: 'charged', amount, day: dueDate.getDate(), dueDate, dueDateStr, balance, autoCharge, waived: false, waiverLabel: '', existingTxId: existingActive.id, insufficientFunds: false };
+    }
+
+    const existingTrash = (financeData.transactions || []).find(t =>
+        t.isDeleted && t.isAccountMgmtFee && String(t.mgmtFeeAccountId) === String(acc.id) && t.mgmtFeeMonthId === monthId
+    );
+    if (existingTrash) {
+        return { enabled: true, status: 'in_trash', amount, day: dueDate.getDate(), dueDate, dueDateStr, balance, autoCharge, waived: false, waiverLabel: '', existingTxId: existingTrash.id, insufficientFunds: false };
+    }
+
+    // 2. Omitida manualmente por el usuario para este mes
+    if (Array.isArray(acc.mgmtFeeSkippedMonths) && acc.mgmtFeeSkippedMonths.includes(monthId)) {
+        return { enabled: true, status: 'skipped', amount, day: dueDate.getDate(), dueDate, dueDateStr, balance, autoCharge, waived: false, waiverLabel: 'Omitida este mes', insufficientFunds: false };
+    }
+
+    // 3. Reglas opcionales de exoneración bancaria (saldo mínimo o ingresos del mes)
+    const waiverType = acc.mgmtFeeWaiverType || 'none';
+    const waiverAmount = round2(acc.mgmtFeeWaiverAmount || 0);
+    if (waiverType === 'min_balance' && waiverAmount > 0 && balance >= waiverAmount) {
+        return { enabled: true, status: 'waived', amount, day: dueDate.getDate(), dueDate, dueDateStr, balance, autoCharge, waived: true, waiverLabel: `Exonerada (saldo ≥ ${formatCompact(waiverAmount)})`, insufficientFunds: false };
+    }
+    if (waiverType === 'monthly_income' && waiverAmount > 0) {
+        const inflows = getAccountMonthlyInflows(acc.id, monthId);
+        if (inflows >= waiverAmount) {
+            return { enabled: true, status: 'waived', amount, day: dueDate.getDate(), dueDate, dueDateStr, balance, autoCharge, waived: true, waiverLabel: `Exonerada (ingresos ≥ ${formatCompact(waiverAmount)})`, insufficientFunds: false };
+        }
+    }
+
+    const insufficientFunds = (acc.accountSubType || 'savings') !== 'checking' && balance < amount;
+    const canAutoCharge = autoCharge && isDueOrPast && !isBeforeConfig && !insufficientFunds;
+
+    return {
+        enabled: true,
+        status: 'pending',
+        amount,
+        day: dueDate.getDate(),
+        dueDate,
+        dueDateStr,
+        balance,
+        autoCharge,
+        waived: false,
+        waiverLabel: '',
+        isDueOrPast,
+        isBeforeConfig,
+        insufficientFunds,
+        canAutoCharge
+    };
+};
+
+const chargeAccountMgmtFee = (accountId, targetMonthId = null, { isAuto = false, allowManualOverride = false } = {}) => {
+    const acc = (financeData.customAccounts || []).find(a => String(a.id) === String(accountId));
+    if (!acc || !isAccountMgmtFeeEligible(acc) || !acc.hasMgmtFee) return { ok: false, reason: 'Cuenta no elegible' };
+
+    const mId = targetMonthId || getMonthId(currentDate);
+    const snap = computeBalancesUpTo(mId);
+    const st = evaluateAccountMgmtFeeCycle(acc, mId, snap, currentDate);
+
+    if (!st.enabled || st.amount <= 0) return { ok: false, reason: 'Cuota inválida' };
+    if (st.status === 'charged') return { ok: false, reason: 'Ya fue cobrada en este mes' };
+    if (!allowManualOverride && (st.status === 'in_trash' || st.status === 'skipped' || st.status === 'waived')) {
+        return { ok: false, reason: 'Ciclo omitido o exonerado' };
+    }
+
+    // Si estaba omitida y el usuario la cobra manualmente, limpiar la omisión de ese mes
+    if (allowManualOverride && Array.isArray(acc.mgmtFeeSkippedMonths)) {
+        acc.mgmtFeeSkippedMonths = acc.mgmtFeeSkippedMonths.filter(m => m !== mId);
+    }
+
+    const now = new Date();
+    const txDateObj = (isAuto && st.dueDate && st.dueDate <= now) ? st.dueDate : now;
+    const usedIds = new Set((financeData.transactions || []).map(t => Number(t.id)));
+    let nextId = txDateObj.getTime();
+    while (usedIds.has(nextId)) nextId += 1;
+
+    const feeCat = (financeData.categories?.expense || []).find(c => /cuotas\s*\/\s*intereses|bancari|financiero/i.test(stripLeadingEmoji(c.name)));
+    const catName = feeCat ? feeCat.name : 'Cuotas / Intereses';
+    const cleanAcc = stripLeadingEmoji(acc.name);
+
+    const tx = {
+        id: nextId,
+        monthId: mId,
+        type: 'expense',
+        status: 'closed',
+        account: acc.id,
+        category: catName,
+        subcategory: 'General',
+        description: `Cuota de manejo (${cleanAcc})`,
+        amount: st.amount,
+        date: `${txDateObj.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}, ${txDateObj.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}`,
+        isAdjustment: false,
+        isTripIsolated: false,
+        isAccountMgmtFee: true,
+        mgmtFeeAccountId: acc.id,
+        mgmtFeeMonthId: mId
+    };
+
+    financeData.transactions.push(tx);
+    localStorage.setItem('myFinances', JSON.stringify(financeData));
+    return { ok: true, tx };
+};
+
+const processAutoAccountMgmtFees = (refDate = currentDate) => {
+    if (!financeData || !Array.isArray(financeData.customAccounts)) return 0;
+    const mId = getMonthId(refDate);
+    let snap = null;
+    let chargedCount = 0;
+
+    financeData.customAccounts.forEach(acc => {
+        if (!isAccountMgmtFeeEligible(acc) || !acc.hasMgmtFee || acc.mgmtFeeAutoCharge === false) return;
+        if (!snap) snap = computeBalancesUpTo(mId);
+        const st = evaluateAccountMgmtFeeCycle(acc, mId, snap, refDate);
+        if (st.enabled && st.status === 'pending' && st.canAutoCharge) {
+            const res = chargeAccountMgmtFee(acc.id, mId, { isAuto: true });
+            if (res.ok) {
+                chargedCount++;
+                snap = computeBalancesUpTo(mId);
+            }
+        }
+    });
+
+    return chargedCount;
 };
 
 // ==========================================

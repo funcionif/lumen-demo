@@ -2962,8 +2962,22 @@ document.getElementById('add-account-form')?.addEventListener('submit', (e) => {
     const excludeLiquidity = !document.getElementById('new-account-liquidity')?.checked;
     const accountSubType = document.getElementById('new-account-subtype')?.value || 'savings';
     const gmfExempt = (accountSubType === 'savings' || accountSubType === 'wallet') && !!document.getElementById('new-account-gmf-exempt')?.checked;
+    const isMgmtEligible = accountSubType === 'savings' || accountSubType === 'checking';
+    const hasMgmtFee = isMgmtEligible && !!document.getElementById('new-account-has-mgmt-fee')?.checked;
+    const mgmtFee = hasMgmtFee ? parseMoneyInput(document.getElementById('new-account-mgmt-fee')?.value) : 0;
+    const mgmtFeeDay = Math.max(1, Math.min(31, parseInt(document.getElementById('new-account-mgmt-day')?.value, 10) || 15));
+    const mgmtFeeAutoCharge = hasMgmtFee ? !!document.getElementById('new-account-mgmt-auto')?.checked : true;
+    const mgmtFeeWaiverType = hasMgmtFee ? (document.getElementById('new-account-mgmt-waiver-type')?.value || 'none') : 'none';
+    const mgmtFeeWaiverAmount = (hasMgmtFee && mgmtFeeWaiverType !== 'none')
+        ? parseMoneyInput(document.getElementById('new-account-mgmt-waiver-amt')?.value)
+        : 0;
 
-    if (!name || financeData.customAccounts.some(a => a.id.toLowerCase() === name.toLowerCase() || a.name.toLowerCase() === name.toLowerCase()) || (financeData.pockets || []).some(p => String(p.id).toLowerCase() === name.toLowerCase())) {
+    if (hasMgmtFee && mgmtFee <= 0) {
+        alert('Ingresa un valor mayor a $0 para la cuota de manejo o desactiva la opción.');
+        return;
+    }
+
+    if (!name || financeData.customAccounts.some(a => a.id.toLowerCase() === name.toLowerCase())) {
         alert('Nombre de cuenta inválido o duplicado.');
         return;
     }
@@ -2972,15 +2986,21 @@ document.getElementById('add-account-form')?.addEventListener('submit', (e) => {
         financeData.customAccounts.forEach(a => { if (a.category === 'asset') a.gmfExempt = false; });
     }
 
-    const safeAccId = /^(?:cxc_|pocket_|deuda_)/i.test(name) ? `Acc_${Date.now()}` : name;
-
     financeData.customAccounts.push({
-        id: safeAccId,
+        id: name,
         name,
         category: 'asset',
         accountSubType,
         gmfExempt,
         gmfReviewed: true,
+        hasMgmtFee,
+        mgmtFee,
+        mgmtFeeDay,
+        mgmtFeeAutoCharge,
+        mgmtFeeWaiverType,
+        mgmtFeeWaiverAmount,
+        mgmtFeeConfiguredAt: hasMgmtFee ? new Date().toLocaleDateString('en-CA') : '',
+        mgmtFeeSkippedMonths: [],
         isDefault: false,
         showWhenZero: false,
         excludeFromLiquidity: excludeLiquidity
@@ -18233,5 +18253,281 @@ if (rentaAnchorObsTarget) {
             baseOpenAccountDetail(accountId, originType);
             renderDebtPrePaidDetailButton(accountId);
         };
+    }
+})();
+// ============================================================
+// MÓDULO 18: CUOTA DE MANEJO EN CUENTAS DE AHORROS Y CORRIENTE
+// ============================================================
+(() => {
+    const syncNewMgmtUI = () => {
+        const subType = document.getElementById('new-account-subtype')?.value || 'savings';
+        const eligible = subType === 'savings' || subType === 'checking';
+        const box = document.getElementById('new-account-mgmt-box');
+        const chk = document.getElementById('new-account-has-mgmt-fee');
+        const fields = document.getElementById('new-account-mgmt-fields');
+        const wType = document.getElementById('new-account-mgmt-waiver-type')?.value || 'none';
+        const wBox = document.getElementById('new-account-mgmt-waiver-box');
+        const wLbl = document.getElementById('new-account-mgmt-waiver-label');
+
+        if (!box) return;
+        box.classList.toggle('hidden', !eligible);
+        if (!eligible && chk) chk.checked = false;
+        if (fields) fields.classList.toggle('hidden', !(eligible && chk?.checked));
+        if (wBox) wBox.classList.toggle('hidden', wType === 'none');
+        if (wLbl) {
+            wLbl.textContent = wType === 'monthly_income'
+                ? 'Ingresos mínimos al mes para exonerar ($)'
+                : 'Saldo mínimo en cuenta para exonerar ($)';
+        }
+    };
+
+    document.getElementById('new-account-subtype')?.addEventListener('change', syncNewMgmtUI);
+    document.getElementById('new-account-has-mgmt-fee')?.addEventListener('change', syncNewMgmtUI);
+    document.getElementById('new-account-mgmt-waiver-type')?.addEventListener('change', syncNewMgmtUI);
+    document.getElementById('add-account-form')?.addEventListener('reset', () => setTimeout(syncNewMgmtUI, 20));
+    syncNewMgmtUI();
+
+    const syncEditWaiverUI = () => {
+        const wType = document.getElementById('edit-account-mgmt-waiver-type')?.value || 'none';
+        const wBox = document.getElementById('edit-account-mgmt-waiver-box');
+        const wLbl = document.getElementById('edit-account-mgmt-waiver-label');
+        if (wBox) wBox.classList.toggle('hidden', wType === 'none');
+        if (wLbl) {
+            wLbl.textContent = wType === 'monthly_income'
+                ? 'Ingresos mínimos al mes para exonerar ($)'
+                : 'Saldo mínimo en cuenta para exonerar ($)';
+        }
+    };
+
+    const renderEditMgmtStatusBox = (acc) => {
+        const statusBox = document.getElementById('edit-account-mgmt-status-box');
+        if (!statusBox || !acc || typeof evaluateAccountMgmtFeeCycle !== 'function') return;
+        if (!acc.hasMgmtFee || round2(acc.mgmtFee || 0) <= 0) {
+            statusBox.innerHTML = '';
+            return;
+        }
+
+        const mId = getMonthId(currentDate);
+        const st = evaluateAccountMgmtFeeCycle(acc, mId, null, currentDate);
+        const esc = window.escapeHtml || ((s) => String(s ?? ''));
+        let toneBg = 'var(--accent-soft)';
+        let toneColor = 'var(--accent)';
+        let title = `Pendiente • Día ${st.day}`;
+        let desc = st.autoCharge
+            ? (st.insufficientFunds
+                ? `Saldo insuficiente (${formatMoney(st.balance)}) para el cobro automático de ${formatMoney(st.amount)}.`
+                : `Se descontará automáticamente (${formatMoney(st.amount)}) el día ${st.day}.`)
+            : `Cobro manual programado (${formatMoney(st.amount)}) para el día ${st.day}.`;
+
+        if (st.status === 'charged') {
+            toneBg = 'var(--positive-bg)'; toneColor = 'var(--positive)';
+            title = 'Cobrada este mes';
+            desc = `Ya se descontó ${formatMoney(st.amount)} en ${mId}.`;
+        } else if (st.status === 'waived') {
+            toneBg = 'var(--positive-bg)'; toneColor = 'var(--positive)';
+            title = 'Exonerada este mes';
+            desc = esc(st.waiverLabel || 'Cumple condición de exoneración.');
+        } else if (st.status === 'skipped') {
+            toneBg = 'rgba(245, 158, 11, 0.14)'; toneColor = '#d97706';
+            title = 'Omitida este mes';
+            desc = 'No se descontará ni restará en Libre Seguro este mes.';
+        } else if (st.status === 'in_trash') {
+            toneBg = 'rgba(245, 158, 11, 0.14)'; toneColor = '#d97706';
+            title = 'En Papelera este mes';
+            desc = 'El cobro de este mes fue enviado a la Papelera y no se repetirá solo.';
+        } else if (st.insufficientFunds) {
+            toneBg = 'var(--negative-bg)'; toneColor = 'var(--negative)';
+            title = 'Saldo insuficiente';
+        }
+
+        const actionsHtml = st.status === 'charged'
+            ? ''
+            : `
+                <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+                    <button type="button" id="btn-charge-acc-mgmt-now" class="mini-action-btn" style="flex:1; justify-content:center; font-weight:800; color:var(--accent);">Cobrar este mes</button>
+                    <button type="button" id="btn-toggle-skip-acc-mgmt" class="mini-action-btn" style="flex:1; justify-content:center;">${st.status === 'skipped' ? 'Reactivar mes' : 'Omitir mes'}</button>
+                    <button type="button" id="btn-ics-acc-mgmt" class="mini-action-btn" style="justify-content:center;" title="Alarma de calendario">Alarma (.ics)</button>
+                </div>
+            `;
+
+        statusBox.innerHTML = `
+            <div style="padding:9px 11px; border-radius:11px; background:${toneBg}; font-size:11.5px; line-height:1.4;">
+                <strong style="display:block; color:${toneColor}; margin-bottom:2px;">${title}</strong>
+                <span style="color:var(--text-main);">${desc}</span>
+                ${actionsHtml}
+            </div>
+        `;
+
+        statusBox.querySelector('#btn-charge-acc-mgmt-now')?.addEventListener('click', () => {
+            const res = chargeAccountMgmtFee(acc.id, mId, { allowManualOverride: true });
+            if (res.ok) {
+                updateDashboard();
+                openAccountDetail(acc.id, lastAccountViewOrigin);
+            }
+        });
+
+        statusBox.querySelector('#btn-toggle-skip-acc-mgmt')?.addEventListener('click', () => {
+            if (!Array.isArray(acc.mgmtFeeSkippedMonths)) acc.mgmtFeeSkippedMonths = [];
+            if (acc.mgmtFeeSkippedMonths.includes(mId)) {
+                acc.mgmtFeeSkippedMonths = acc.mgmtFeeSkippedMonths.filter(x => x !== mId);
+            } else {
+                acc.mgmtFeeSkippedMonths.push(mId);
+            }
+            localStorage.setItem('myFinances', JSON.stringify(financeData));
+            updateDashboard();
+            renderEditMgmtStatusBox(acc);
+        });
+
+        statusBox.querySelector('#btn-ics-acc-mgmt')?.addEventListener('click', () => {
+            if (typeof downloadIcsEvent === 'function' && st.dueDate) {
+                const cleanAcc = stripLeadingEmoji(acc.name);
+                downloadIcsEvent(`Cuota de manejo ${cleanAcc}`, `Cobro estimado: ${formatMoney(st.amount)} en tu cuenta ${cleanAcc}.`, st.dueDate);
+            }
+        });
+    };
+
+    const populateEditAccountMgmtUI = () => {
+        const section = document.getElementById('edit-account-mgmt-section');
+        const accId = document.getElementById('reconcile-account-id')?.value || '';
+        if (!section || !accId || typeof financeData === 'undefined') return;
+
+        const acc = (financeData.customAccounts || []).find(a => String(a.id) === String(accId));
+        const subType = document.getElementById('edit-account-subtype')?.value || acc?.accountSubType || 'savings';
+        const eligible = acc && acc.category === 'asset' && acc.id !== 'Efectivo' && !String(acc.id).startsWith('CxC_') && (subType === 'savings' || subType === 'checking');
+
+        section.classList.toggle('hidden', !eligible);
+        if (!eligible) return;
+
+        const chk = document.getElementById('edit-account-has-mgmt-fee');
+        const fields = document.getElementById('edit-account-mgmt-fields');
+        const feeInp = document.getElementById('edit-account-mgmt-fee');
+        const dayInp = document.getElementById('edit-account-mgmt-day');
+        const autoChk = document.getElementById('edit-account-mgmt-auto');
+        const wTypeSel = document.getElementById('edit-account-mgmt-waiver-type');
+        const wAmtInp = document.getElementById('edit-account-mgmt-waiver-amt');
+
+        if (chk) chk.checked = !!acc.hasMgmtFee;
+        if (fields) fields.classList.toggle('hidden', !acc.hasMgmtFee);
+        if (feeInp) feeInp.value = acc.mgmtFee > 0 ? formatNumberInput(acc.mgmtFee) : '';
+        if (dayInp) dayInp.value = acc.mgmtFeeDay || 15;
+        if (autoChk) autoChk.checked = acc.mgmtFeeAutoCharge !== false;
+        if (wTypeSel) wTypeSel.value = acc.mgmtFeeWaiverType || 'none';
+        if (wAmtInp) wAmtInp.value = acc.mgmtFeeWaiverAmount > 0 ? formatNumberInput(acc.mgmtFeeWaiverAmount) : '';
+
+        syncEditWaiverUI();
+        renderEditMgmtStatusBox(acc);
+    };
+
+    document.getElementById('edit-account-has-mgmt-fee')?.addEventListener('change', (e) => {
+        const fields = document.getElementById('edit-account-mgmt-fields');
+        if (fields) fields.classList.toggle('hidden', !e.target.checked);
+        if (!e.target.checked) {
+            const accId = document.getElementById('reconcile-account-id')?.value || '';
+            const acc = (financeData.customAccounts || []).find(a => String(a.id) === String(accId));
+            if (acc && acc.hasMgmtFee) {
+                acc.hasMgmtFee = false;
+                localStorage.setItem('myFinances', JSON.stringify(financeData));
+                hasUnsavedChanges = false;
+                updateDashboard();
+            }
+        }
+    });
+
+    document.getElementById('edit-account-mgmt-waiver-type')?.addEventListener('change', syncEditWaiverUI);
+
+    document.getElementById('edit-account-subtype')?.addEventListener('change', (e) => {
+        const sub = e.target.value;
+        const accId = document.getElementById('reconcile-account-id')?.value || '';
+        const acc = (financeData.customAccounts || []).find(a => String(a.id) === String(accId));
+        if (acc && sub !== 'savings' && sub !== 'checking' && acc.hasMgmtFee) {
+            acc.hasMgmtFee = false;
+            localStorage.setItem('myFinances', JSON.stringify(financeData));
+        }
+        setTimeout(populateEditAccountMgmtUI, 20);
+    });
+
+    document.getElementById('btn-save-account-mgmt-fee')?.addEventListener('click', () => {
+        const accId = document.getElementById('reconcile-account-id')?.value || '';
+        const acc = (financeData.customAccounts || []).find(a => String(a.id) === String(accId));
+        if (!acc) return;
+
+        const enabled = !!document.getElementById('edit-account-has-mgmt-fee')?.checked;
+        const feeVal = parseMoneyInput(document.getElementById('edit-account-mgmt-fee')?.value);
+        const dayVal = Math.max(1, Math.min(31, parseInt(document.getElementById('edit-account-mgmt-day')?.value, 10) || 15));
+        const autoVal = !!document.getElementById('edit-account-mgmt-auto')?.checked;
+        const wType = document.getElementById('edit-account-mgmt-waiver-type')?.value || 'none';
+        const wAmt = wType !== 'none' ? parseMoneyInput(document.getElementById('edit-account-mgmt-waiver-amt')?.value) : 0;
+
+        if (enabled && feeVal <= 0) {
+            alert('Ingresa un valor mayor a $0 para la cuota de manejo.');
+            return;
+        }
+
+        const wasEnabled = !!acc.hasMgmtFee;
+        acc.hasMgmtFee = enabled;
+        acc.mgmtFee = enabled ? feeVal : 0;
+        acc.mgmtFeeDay = dayVal;
+        acc.mgmtFeeAutoCharge = autoVal;
+        acc.mgmtFeeWaiverType = enabled ? wType : 'none';
+        acc.mgmtFeeWaiverAmount = enabled ? wAmt : 0;
+        if (enabled && (!wasEnabled || !acc.mgmtFeeConfiguredAt)) {
+            acc.mgmtFeeConfiguredAt = new Date().toLocaleDateString('en-CA');
+        }
+        if (!Array.isArray(acc.mgmtFeeSkippedMonths)) acc.mgmtFeeSkippedMonths = [];
+
+        localStorage.setItem('myFinances', JSON.stringify(financeData));
+        hasUnsavedChanges = false;
+        updateDashboard();
+        renderEditMgmtStatusBox(acc);
+
+        const toast = document.createElement('div');
+        toast.className = 'sw-toast';
+        toast.textContent = enabled ? 'Cuota de manejo guardada' : 'Cuota de manejo desactivada';
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 2200);
+    });
+
+    // Sincronizar automáticamente cuando se abre el detalle de cualquier cuenta
+    const detailView = document.getElementById('account-detail-view');
+    if (detailView) {
+        new MutationObserver(() => {
+            if (!detailView.classList.contains('hidden')) {
+                setTimeout(populateEditAccountMgmtUI, 25);
+            }
+        }).observe(detailView, { attributes: true, attributeFilter: ['class'] });
+    }
+
+    // Inyectar píldora visual sutil en la lista de Cuentas (#accounts-summary-list)
+    const decorateAccountMgmtBadges = () => {
+        const listEl = document.getElementById('accounts-summary-list');
+        if (!listEl || typeof evaluateAccountMgmtFeeCycle !== 'function') return;
+        const mId = getMonthId(currentDate);
+        listEl.querySelectorAll('.acc-list-item[data-lumen-args]').forEach(row => {
+            if (row.querySelector('.acc-mgmt-pill')) return;
+            let accId = '';
+            try { accId = JSON.parse(row.getAttribute('data-lumen-args') || '[]')[0] || ''; } catch { return; }
+            const acc = (financeData.customAccounts || []).find(a => String(a.id) === String(accId));
+            if (!acc || !isAccountMgmtFeeEligible(acc) || !acc.hasMgmtFee) return;
+            const st = evaluateAccountMgmtFeeCycle(acc, mId, null, currentDate);
+            if (!st.enabled) return;
+
+            const nameBox = row.querySelector('.acc-list-name > div') || row.querySelector('.acc-list-name');
+            if (!nameBox) return;
+            const pill = document.createElement('small');
+            pill.className = 'acc-mgmt-pill';
+            pill.style.cssText = 'display:block; font-size:10px; font-weight:700; margin-top:2px; color:' +
+                (st.status === 'waived' || st.status === 'charged' ? 'var(--positive)' : 'var(--text-muted)') + ';';
+            pill.textContent = st.status === 'waived'
+                ? 'Manejo exonerado este mes'
+                : (st.status === 'charged'
+                    ? `Manejo cobrado (${formatCompact(st.amount)})`
+                    : `Manejo: ${formatCompact(st.amount)} • Día ${st.day}`);
+            nameBox.appendChild(pill);
+        });
+    };
+
+    const accListEl = document.getElementById('accounts-summary-list');
+    if (accListEl) {
+        new MutationObserver(decorateAccountMgmtBadges).observe(accListEl, { childList: true });
     }
 })();

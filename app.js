@@ -625,7 +625,7 @@ const openQuickActionModal = ({
     const qModal = document.getElementById('quick-action-modal');
     if (!qModal) return;
 
-    const assetsAcc = sortAlphabeticallyWithDefault(financeData.customAccounts.filter(a => a.category === 'asset'));
+    const assetsAcc = sortAlphabeticallyWithDefault(financeData.customAccounts.filter(a => a.category === 'asset' && !a.id.startsWith('CxC_')));
     if (showAccountSelect && assetsAcc.length === 0) {
         alert("Crea primero una cuenta de liquidez en 'Cuentas'.");
         return;
@@ -2715,6 +2715,47 @@ const renderSmartAlerts = (monthId, snap) => {
         });
     }
 
+    // --- ALERTAS DE CUOTA DE MANEJO EN CUENTAS BANCARIAS ---
+    if (typeof evaluateAccountMgmtFeeCycle === 'function') {
+        const escFee = window.escapeHtml || ((s) => String(s ?? ''));
+        const todayStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
+        (financeData.customAccounts || []).filter(a => isAccountMgmtFeeEligible(a) && a.hasMgmtFee).forEach(acc => {
+            const st = evaluateAccountMgmtFeeCycle(acc, currRealMonthId, snap, currentDate);
+            if (!st.enabled || st.status !== 'pending' || !st.dueDate) return;
+            const cleanDue = new Date(st.dueDate.getFullYear(), st.dueDate.getMonth(), st.dueDate.getDate());
+            const diffDays = Math.round((cleanDue.getTime() - todayStart.getTime()) / 86400000);
+            const showInsuff = st.insufficientFunds && st.isDueOrPast && !st.isBeforeConfig;
+            if (!showInsuff && (diffDays < -5 || diffDays > (prefs.daysBefore || 3))) return;
+
+            const cleanAcc = stripLeadingEmoji(acc.name);
+            const whenTxt = diffDays < 0 ? `venció hace ${Math.abs(diffDays)} día(s)` : (diffDays === 0 ? 'se cobra hoy' : `se cobra en ${diffDays} día(s)`);
+            const descTxt = showInsuff
+                ? `Saldo insuficiente en ${escFee(cleanAcc)} (${formatMoney(st.balance)}) para debitar ${formatMoney(st.amount)}.`
+                : `Cuota de manejo de ${escFee(cleanAcc)} (${formatMoney(st.amount)}) ${whenTxt}.`;
+
+            alerts.push({
+                id: `accmgmt_${acc.id}_${currRealMonthId}`,
+                title: `${renderIcon(showInsuff ? 'alert' : 'bank', 14)} ${showInsuff ? 'Saldo insuficiente • Manejo' : 'Cuota de manejo próxima'}`,
+                desc: descTxt,
+                actionLabel: 'Cobrar',
+                onAction: () => {
+                    window.openBentoConfirmModal?.({
+                        title: 'Descontar cuota de manejo',
+                        subtitle: cleanAcc,
+                        message: `¿Descontar <b>${formatMoney(st.amount)}</b> de <b>${escFee(cleanAcc)}</b> correspondiente a ${currRealMonthId}?`,
+                        confirmText: 'Descontar ahora',
+                        cancelText: 'Cancelar',
+                        danger: false,
+                        onConfirm: () => {
+                            const res = chargeAccountMgmtFee(acc.id, currRealMonthId, { allowManualOverride: true });
+                            if (res.ok) updateDashboard();
+                        }
+                    });
+                }
+            });
+        });
+    }
+
     // --- ALERTA PREVENTIVA TOPE EXENTO 4x1000 (80% DE 350 / 65 UVT) ---
     if (typeof getGmfAccountInfo === 'function' && typeof getMonthlyGmfUsedOutflows === 'function') {
         const escGmf = window.escapeHtml || ((s) => String(s ?? ''));
@@ -3091,7 +3132,15 @@ const renderAccountSelects = (onlyAssetsForMain = false, forcedSelectedId = null
 
     const allAssets = sortAlphabeticallyWithDefault(financeData.customAccounts.filter(a => a.category === 'asset'));
     const standardAssets = allAssets.filter(a => !a.id.startsWith('CxC_'));
-    const cxcAssets = allAssets.filter(a => a.id.startsWith('CxC_'));
+    const editTxId = document.getElementById('edit-id')?.value || '';
+    const editingTx = editTxId ? (financeData.transactions || []).find(t => String(t.id) === String(editTxId)) : null;
+    const keepCxcIds = new Set(
+        [editingTx?.account, editingTx?.toAccount].filter(id => id && String(id).startsWith('CxC_'))
+    );
+    const cxcAssets = allAssets.filter(a =>
+        a.id.startsWith('CxC_') &&
+        (round2(currentBalances[a.id] || 0) > 0 || keepCxcIds.has(a.id))
+    );
     
     const cards = sortAlphabeticallyWithDefault(financeData.customAccounts.filter(a => a.category === 'credit_card'));
     const revolvingDebts = sortAlphabeticallyWithDefault(financeData.customAccounts.filter(a => a.category === 'debt' && a.debtType === 'revolving'));
@@ -3202,6 +3251,9 @@ window.updateDashboard = () => {
     const viewMonthId = getMonthId(viewDate);
     const currentMonthId = getMonthId(currentDate);
     const isFuture = viewMonthId > currentMonthId;
+    if (typeof processAutoAccountMgmtFees === 'function') {
+        try { processAutoAccountMgmtFees(currentDate); } catch (e) { console.error(e); }
+    }
 
     if (document.getElementById('current-month-display')) document.getElementById('current-month-display').innerText = formatMonthName(viewDate);
     // Lógica para mostrar días restantes solo en el mes actual
@@ -7905,6 +7957,21 @@ window.renderTransactionHistory = (monthId, snap, projectionData) => {
                     });
                 }
             });
+
+            if (typeof evaluateAccountMgmtFeeCycle === 'function') {
+                financeData.customAccounts.filter(a => isAccountMgmtFeeEligible(a) && a.hasMgmtFee).forEach(acc => {
+                    const st = evaluateAccountMgmtFeeCycle(acc, monthId, snap, currentDate);
+                    if (st.enabled && st.status === 'pending' && st.amount > 0) {
+                        filteredTxs.push({
+                            id: `v_accmgmt_${acc.id}`, isVirtual: true, status: 'pending', type: 'expense',
+                            account: acc.id, category: 'Cuotas / Intereses',
+                            description: `Cuota de manejo: ${stripLeadingEmoji(acc.name)}`,
+                            amount: st.amount,
+                            date: `Cobro: Día ${st.day}${st.autoCharge ? ' • Auto' : ''}`
+                        });
+                    }
+                });
+            }
                 
                 const mIdx = viewDate.getMonth();
                 const vYear = viewDate.getFullYear();
@@ -8243,6 +8310,17 @@ const resolveBatchConfirmables = (rawIds = []) => {
             }
             return;
         }
+        if (idStr.startsWith('v_accmgmt_')) {
+            const accId = idStr.replace('v_accmgmt_', '');
+            const acc = (financeData.customAccounts || []).find(a => String(a.id) === accId && a.hasMgmtFee);
+            if (acc && typeof evaluateAccountMgmtFeeCycle === 'function') {
+                const st = evaluateAccountMgmtFeeCycle(acc, vMonthId, snap, currentDate);
+                if (st.enabled && st.status === 'pending' && st.amount > 0) {
+                    items.push({ kind: 'v_accmgmt', accId: acc.id, amount: st.amount, monthId: vMonthId });
+                }
+            }
+            return;
+        }
         if (idStr.startsWith('v_budget_')) {
             const rawKey = idStr.replace('v_budget_', '');
             const [catPart, subPart = ''] = rawKey.includes('::')
@@ -8446,6 +8524,12 @@ const confirmPendingTransactionsBatch = (rawIds = []) => {
                 });
             }
             doneCount++;
+            return;
+        }
+
+        if (entry.kind === 'v_accmgmt' && typeof chargeAccountMgmtFee === 'function') {
+            const res = chargeAccountMgmtFee(entry.accId, entry.monthId, { allowManualOverride: true });
+            if (res.ok) doneCount++;
             return;
         }
 
@@ -8835,6 +8919,24 @@ window.renderUpcoming7DaysWidget = (viewMonthId) => {
                     openAccountDetail(refId, 'home');
                     if (kind === 'debt') document.getElementById('open-pay-installment-btn')?.click();
                 }
+            } else if (kind === 'acc_mgmt_fee' && typeof chargeAccountMgmtFee === 'function') {
+                const acc = (financeData.customAccounts || []).find(a => String(a.id) === String(refId));
+                if (!acc) return;
+                const cleanAcc = stripLeadingEmoji(acc.name);
+                const escA2 = window.escapeHtml || ((s) => String(s ?? ''));
+                const mTarget = btn.getAttribute('data-up7d-month') || getMonthId(currentDate);
+                window.openBentoConfirmModal?.({
+                    title: 'Descontar cuota de manejo',
+                    subtitle: cleanAcc,
+                    message: `¿Descontar <b>${formatMoney(round2(acc.mgmtFee || 0))}</b> de <b>${escA2(cleanAcc)}</b>?`,
+                    confirmText: 'Descontar ahora',
+                    cancelText: 'Cancelar',
+                    danger: false,
+                    onConfirm: () => {
+                        const res = chargeAccountMgmtFee(acc.id, mTarget, { allowManualOverride: true });
+                        if (res.ok) updateDashboard();
+                    }
+                });
             } else if (kind === 'pending_tx') {
                 confirmPendingTx(refId, ev);
             }
@@ -8880,7 +8982,7 @@ window.renderUpcoming7DaysWidget = (viewMonthId) => {
                                 <span class="widget-badge ${tagTone}" style="font-size:9.5px; padding:1.5px 6px;">${dayTag}</span>
                                 <small style="font-size:10.5px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(it.subtitle)}</small>
                             </div>
-                            <button type="button" class="mini-action-btn" data-up7d-kind="${escA(it.kind)}" data-up7d-id="${escA(it.refId)}" style="padding:4px 10px; font-size:10.5px; font-weight:800; flex-shrink:0;">
+                            <button type="button" class="mini-action-btn" data-up7d-kind="${escA(it.kind)}" data-up7d-id="${escA(it.refId)}" data-up7d-month="${escA(it.monthId || '')}" style="padding:4px 10px; font-size:10.5px; font-weight:800; flex-shrink:0;">
                                 ${esc(it.actionLabel)}
                             </button>
                         </div>
@@ -9164,6 +9266,27 @@ document.getElementById('transaction-list')?.addEventListener('click', (e) => {
         }
         if (String(txId).startsWith('v_card_')) {
             if (typeof openAccountDetail === 'function') openAccountDetail(txId.replace('v_card_', ''), 'home');
+            return;
+        }
+        if (String(txId).startsWith('v_accmgmt_') && typeof chargeAccountMgmtFee === 'function') {
+            const accId = String(txId).replace('v_accmgmt_', '');
+            const acc = (financeData.customAccounts || []).find(a => String(a.id) === accId);
+            if (!acc) return;
+            const cleanAcc = stripLeadingEmoji(acc.name);
+            const escA3 = window.escapeHtml || ((s) => String(s ?? ''));
+            const mTarget = getMonthId(viewDate);
+            window.openBentoConfirmModal?.({
+                title: 'Descontar cuota de manejo',
+                subtitle: cleanAcc,
+                message: `¿Descontar <b>${formatMoney(round2(acc.mgmtFee || 0))}</b> de <b>${escA3(cleanAcc)}</b>?`,
+                confirmText: 'Descontar ahora',
+                cancelText: 'Cancelar',
+                danger: false,
+                onConfirm: () => {
+                    const res = chargeAccountMgmtFee(acc.id, mTarget, { allowManualOverride: true });
+                    if (res.ok) updateDashboard();
+                }
+            });
             return;
         }
         if (String(txId).startsWith('v_budget_')) {
@@ -9683,46 +9806,7 @@ document.getElementById('btn-cloud-backup')?.addEventListener('click', () => {
 document.getElementById('btn-cloud-restore')?.addEventListener('click', () => {
     alert('[Próximamente] La app descargará y aplicará tu último respaldo desde Google Drive.');
 });
-// --- LÓGICA DEL BANNER DE NOVEDADES (BIOMETRÍA) ---
-window.checkWhatsNewBanner = async () => {
-    if (document.body?.classList.contains('app-locked') || window.LumenSecurity?.isVaultLocked?.()) return;
-    // 1. Verificamos si ya vio el banner en el pasado
-    if (localStorage.getItem('myFinancesBioBannerSeen')) return;
-    
-    // 2. Solo lo mostramos a usuarios registrados que NO hayan activado biometría aún
-    if (authData && !authData.biometricEnabled) {
-        
-        // 3. Verificamos si el dispositivo soporta Face ID / Huella (para no ilusionar si no tiene hardware)
-        const bioAvailable = await isBiometricHardwareAvailable();
-        
-        if (bioAvailable) {
-            const modal = document.getElementById('bio-update-modal');
-            if (modal) modal.classList.remove('hidden');
-        } else {
-            // Si no está disponible (ej. PC sin lector), marcamos como visto para no molestar
-            localStorage.setItem('myFinancesBioBannerSeen', 'true');
-        }
-    }
-};
 
-document.getElementById('btn-close-bio-modal')?.addEventListener('click', () => {
-    localStorage.setItem('myFinancesBioBannerSeen', 'true');
-    document.getElementById('bio-update-modal')?.classList.add('hidden');
-});
-
-document.getElementById('btn-go-to-bio-setup')?.addEventListener('click', () => {
-    localStorage.setItem('myFinancesBioBannerSeen', 'true');
-    document.getElementById('bio-update-modal').classList.add('hidden');
-
-    // Navegación automática a la sección de Configuración de Seguridad
-    const profileModal = document.getElementById('profile-modal');
-    if (profileModal) profileModal.classList.remove('hidden');
-
-    document.querySelectorAll('.profile-section, .profile-body').forEach(el => el.classList.add('hidden'));
-
-    const secView = document.getElementById('profile-security-view');
-    if (secView) secView.classList.remove('hidden');
-});
 const LUMEN_UPDATE_SLIDES = [
     {
         title: 'Mis Finanzas ahora es Lumen',
@@ -10705,6 +10789,22 @@ window.syncNativeLocalNotifications = async () => {
             addReminder(`Pago recurrente: ${stripLeadingEmoji(sub.name)}`, `Se cobra el ${sub.nextBillingDate}. ${amtText}`, alertDate);
         });
 
+        // B2. Cuota de manejo en cuentas bancarias (ahorros / corriente)
+        if (typeof evaluateAccountMgmtFeeCycle === 'function') {
+            const mNowId = getMonthId(now);
+            const mNextId = getMonthId(new Date(now.getFullYear(), now.getMonth() + 1, 1));
+            (financeData.customAccounts || []).filter(a => isAccountMgmtFeeEligible(a) && a.hasMgmtFee).forEach(acc => {
+                [mNowId, mNextId].forEach(mId => {
+                    const st = evaluateAccountMgmtFeeCycle(acc, mId, currSnap, now);
+                    if (!st.enabled || st.status !== 'pending' || !st.dueDate) return;
+                    const alertDate = new Date(st.dueDate.getFullYear(), st.dueDate.getMonth(), st.dueDate.getDate());
+                    alertDate.setDate(alertDate.getDate() - (prefs.daysBefore || 2));
+                    const amtText = hideAmounts ? 'Revisa el detalle en Lumen.' : `Valor: ${formatMoney(st.amount)}.`;
+                    addReminder(`Cuota de manejo: ${stripLeadingEmoji(acc.name)}`, `Cobro programado el día ${st.day}. ${amtText}`, alertDate);
+                });
+            });
+        }
+
         // C. Vencimientos de CDT / CDAT
         if (typeof getCDTPortfolioInsights === 'function') {
             const cdtInfo = getCDTPortfolioInsights(now);
@@ -11085,11 +11185,251 @@ window.buildLumiQuincenaTipHTML = ({ plan, label = '', payDay = null, amount = 0
         </div>`;
 };
 
-// 1. Tip en Nuevo Gasto
+// 1B. Tip de Lumi en Transferencia hacia Tarjetas de Crédito o Préstamos (Auditado)
+window.renderLumiDebtPaymentTipTx = () => {
+    const box = document.getElementById('lumi-quincena-tip-tx');
+    if (!box) return;
+
+    const editId = document.getElementById('edit-id')?.value || '';
+    const fromAccId = document.getElementById('account')?.value || '';
+    const toAccId = document.getElementById('to-account')?.value || '';
+    if (editId || !toAccId || String(fromAccId) === String(toAccId)) {
+        box.innerHTML = '';
+        return;
+    }
+
+    const toAcc = (financeData.customAccounts || []).find(a => String(a.id) === String(toAccId));
+    if (!toAcc || (toAcc.category !== 'credit_card' && toAcc.category !== 'debt')) {
+        box.innerHTML = '';
+        return;
+    }
+
+    const dateVal = document.getElementById('trans-date')?.value || '';
+    const refDate = /^\d{4}-\d{2}-\d{2}$/.test(dateVal) ? new Date(`${dateVal}T12:00:00`) : new Date(currentDate);
+    const refMonthId = typeof getMonthId === 'function' ? getMonthId(refDate) : '';
+    const liveSnap = (refMonthId && typeof computeBalancesUpTo === 'function')
+        ? computeBalancesUpTo(refMonthId)
+        : { bals: currentBalances || {} };
+    const curBal = Math.max(0, round2(liveSnap.bals[toAcc.id] || 0));
+
+    if (curBal <= 0.01) {
+        box.innerHTML = '';
+        return;
+    }
+
+    const payMode = document.getElementById('transfer-payment-mode')?.value || 'installments';
+    const isExtraMode = payMode === 'extraordinary';
+    const isLibranza = toAcc.category === 'debt' && !!toAcc.payrollDeduction;
+    const esc = window.escapeHtml || ((s) => String(s ?? ''));
+    const escA = window.escapeAttr || esc;
+    const cleanName = stripLeadingEmoji(toAcc.name || 'Deuda');
+    const safeName = esc(cleanName);
+    const fmtShortPay = (dt) => `${dt.getDate()} ${getShortMonthLabel(dt).toLowerCase()}.`;
+
+    let badgeLabel = 'Ciclo actual';
+    let isCyclePaid = false;
+    let suggestedMin = 0;
+    let minExtraCharges = 0;
+    let totalPayoff = curBal;
+    let totalExtraCharges = 0;
+    let paidSoFar = 0;
+    let dueCycleTxIds = [];
+    let allPendingTxIds = [];
+    const parts = [];
+
+    if (toAcc.category === 'credit_card') {
+        const activeCyc = typeof getCardActivePayCycle === 'function' ? getCardActivePayCycle(toAcc, refDate) : null;
+        const payDt = activeCyc?.activePayDate || null;
+        const cutRef = activeCyc?.activeCutDate || refDate;
+        const est = typeof calculateCardMinPaymentEstimate === 'function'
+            ? calculateCardMinPaymentEstimate(toAcc, curBal, cutRef)
+            : { totalMinPayment: 0 };
+        const cycSt = (payDt && typeof getLiabilityDueCycleState === 'function')
+            ? getLiabilityDueCycleState(toAcc, curBal, payDt, refDate)
+            : null;
+
+        const allPending = typeof getPendingCardPurchases === 'function' ? getPendingCardPurchases(toAcc.id, refDate) : [];
+        allPendingTxIds = allPending.map(p => String(p.tx.id));
+        dueCycleTxIds = allPending.filter(p => p.isDueInActiveCycle !== false).map(p => String(p.tx.id));
+
+        isCyclePaid = !!(cycSt && cycSt.isPaid);
+        paidSoFar = cycSt ? round2(cycSt.paidAmount || 0) : 0;
+        suggestedMin = cycSt ? round2(cycSt.remainingQuota || 0) : round2(est.totalMinPayment || 0);
+        if (payDt) badgeLabel = isCyclePaid ? 'Ciclo al día' : `Pago ${fmtShortPay(payDt)}`;
+
+        if (est.deferredQuota > 0) parts.push(`Diferidos: <b>${formatMoney(est.deferredQuota)}</b>`);
+        if (est.initialQuotaApplied > 0) parts.push(`Cuota inicial: <b>${formatMoney(est.initialQuotaApplied)}</b>`);
+        if (est.mgmtFeeAmt > 0) parts.push(`Manejo: <b>${formatMoney(est.mgmtFeeAmt)}</b>`);
+        if (est.insuranceAmt > 0) parts.push(`Seguro: <b>${formatMoney(est.insuranceAmt)}</b>`);
+
+        // Solo cargos aún no asentados + interés de deuda inicial (los intereses de diferidos los crea applyTransferAllocatedItems)
+        const unchargedFees = round2((est.mgmtFeeAmt || 0) + (est.insuranceAmt || 0));
+        const rawMinExtra = round2(unchargedFees + (est.initialInterestApplied || 0));
+        if (paidSoFar <= 0 && rawMinExtra > 0 && rawMinExtra < suggestedMin) {
+            minExtraCharges = rawMinExtra;
+        }
+        if (unchargedFees > 0 && !isExtraMode) {
+            totalPayoff = round2(curBal + unchargedFees);
+            totalExtraCharges = unchargedFees;
+        }
+    } else {
+        const qInfo = typeof getDebtMonthlyQuotaBreakdown === 'function'
+            ? getDebtMonthlyQuotaBreakdown(toAcc, curBal)
+            : { totalQuota: round2(toAcc.debtMonthlyPayment || 0), baseInterest: 0, totalPrincipal: 0, totalInterest: 0, subPurchases: [] };
+        const allPendingRev = Array.isArray(qInfo.subPurchases) ? qInfo.subPurchases : [];
+        allPendingTxIds = allPendingRev.map(p => String(p.tx.id));
+        dueCycleTxIds = allPendingRev.filter(p => p.isDueInActiveCycle !== false).map(p => String(p.tx.id));
+
+        const nextDue = typeof getNextUnpaidLiabilityCycle === 'function'
+            ? getNextUnpaidLiabilityCycle(toAcc, curBal, refDate, 5)
+            : null;
+
+        if (isLibranza) {
+            badgeLabel = 'Libranza';
+        } else if (nextDue) {
+            suggestedMin = round2(nextDue.amount || 0);
+            badgeLabel = `Pago ${fmtShortPay(nextDue.dueDate)}`;
+        } else if (toAcc.paymentDay) {
+            const maxD = new Date(refDate.getFullYear(), refDate.getMonth() + 1, 0).getDate();
+            const dueThisM = new Date(refDate.getFullYear(), refDate.getMonth(), Math.min(toAcc.paymentDay, maxD), 12, 0, 0);
+            const stThisM = typeof getLiabilityDueCycleState === 'function'
+                ? getLiabilityDueCycleState(toAcc, curBal, dueThisM, refDate)
+                : null;
+            isCyclePaid = !!(stThisM && stThisM.isPaid);
+            suggestedMin = isCyclePaid ? 0 : round2(qInfo.totalQuota || 0);
+            badgeLabel = isCyclePaid ? 'Ciclo al día' : `Día ${toAcc.paymentDay}`;
+        } else {
+            suggestedMin = round2(qInfo.totalQuota || 0);
+            badgeLabel = 'Cuota del mes';
+        }
+
+        if (qInfo.totalPrincipal > 0) parts.push(`Capital: <b>${formatMoney(qInfo.totalPrincipal)}</b>`);
+        if (qInfo.totalInterest > 0) parts.push(`Interés: <b>${formatMoney(qInfo.totalInterest)}</b>`);
+
+        // En préstamo fijo puro sin sub-compras, el interés del mes va a cargos extra para que el capital baje exacto
+        if (toAcc.debtType !== 'revolving' && allPendingTxIds.length === 0 && qInfo.baseInterest > 0 && qInfo.baseInterest < suggestedMin) {
+            minExtraCharges = round2(qInfo.baseInterest);
+        }
+    }
+
+    const sparkleSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>`;
+    const currentTyped = parseMoneyInput(document.getElementById('amount')?.value || '0');
+    const isMinApplied = suggestedMin > 0 && Math.abs(currentTyped - suggestedMin) < 0.5;
+    const isTotalApplied = totalPayoff > 0 && Math.abs(currentTyped - totalPayoff) < 0.5;
+
+    let bodyText = '';
+    if (isExtraMode) {
+        badgeLabel = 'Capital directo';
+        bodyText = `Estás en <b>abono extraordinario</b> a <b>${safeName}</b>: el 100% reduce capital (saldo vigente: <b>${formatMoney(curBal)}</b>). Si quieres pagar la cuota del mes, cambia Modalidad a <i>Cuota(s) del mes</i>.`;
+    } else if (isLibranza) {
+        bodyText = `<b>${safeName}</b> tiene <b>libranza</b> (su cuota ya se descuenta al registrar tu nómina). Usa esta transferencia solo si vas a hacer un abono manual o liquidar tu saldo de <b>${formatMoney(curBal)}</b>.`;
+    } else if (isCyclePaid) {
+        bodyText = `El ciclo actual de <b>${safeName}</b> ya está al día. Si deseas abonar extra o liquidar, tu saldo vigente es de <b>${formatMoney(curBal)}</b>.`;
+    } else if (suggestedMin > 0) {
+        const labelTipo = toAcc.category === 'credit_card' ? 'pago mínimo estimado' : 'cuota estimada';
+        const breakdownStr = parts.length > 0 ? `<div style="margin-top:4px; font-size:11px; color:var(--text-muted);">${parts.join(' • ')}</div>` : '';
+        const partialStr = paidSoFar > 0 ? ` <span style="color:var(--text-muted);">(Ya abonaste ${formatCompact(paidSoFar)} en este ciclo).</span>` : '';
+        bodyText = `Para <b>${safeName}</b>, Lumen calcula un ${labelTipo} de <b>${formatMoney(suggestedMin)}</b> este ciclo.${partialStr}${breakdownStr}`;
+    } else {
+        bodyText = `Saldo vigente de <b>${safeName}</b>: <b>${formatMoney(curBal)}</b>.`;
+    }
+
+    const showMinBtn = !isExtraMode && !isLibranza && !isCyclePaid && suggestedMin > 0;
+    const minLabel = toAcc.category === 'credit_card' ? 'Usar Mínimo' : 'Usar Cuota Mes';
+    const totalLabel = isExtraMode
+        ? 'Liquidar Capital Total'
+        : (totalExtraCharges > 0 ? 'Pago Total (+cargos)' : 'Pago Total Deuda');
+    const gridStyle = showMinBtn ? '' : 'style="grid-template-columns:1fr;"';
+
+    box.innerHTML = `
+        <div class="lumi-quincena-tip">
+            <div class="lumi-quincena-header">
+                <span style="display:inline-flex; align-items:center; gap:5px;">${sparkleSvg} Tip de Lumi • Pago del Ciclo</span>
+                <span class="lumi-quincena-badge">${esc(badgeLabel)}</span>
+            </div>
+            <div>${bodyText}</div>
+            <div class="lumi-quincena-grid" ${gridStyle}>
+                ${showMinBtn ? `
+                <button type="button" class="lumi-q-pill ${isMinApplied ? '' : 'recommended'}" data-lumi-pay-kind="min" data-lumi-apply-amt="${suggestedMin}" data-lumi-apply-extra="${minExtraCharges}" data-lumi-apply-desc="Pago ${escA(cleanName)}" style="text-align:left; cursor:pointer; font-family:inherit; ${isMinApplied ? 'border-color:var(--positive);' : ''}">
+                    <span>${isMinApplied ? '✓ Aplicado (Mín.)' : minLabel}</span>
+                    <strong style="color:${isMinApplied ? 'var(--positive)' : 'var(--accent)'};">${formatMoney(suggestedMin)}</strong>
+                </button>` : ''}
+                <button type="button" class="lumi-q-pill" data-lumi-pay-kind="total" data-lumi-apply-amt="${totalPayoff}" data-lumi-apply-extra="${totalExtraCharges}" data-lumi-apply-desc="Pago total ${escA(cleanName)}" style="text-align:left; cursor:pointer; font-family:inherit; ${isTotalApplied ? 'border-color:var(--positive);' : ''}">
+                    <span>${isTotalApplied ? '✓ Aplicado (Total)' : totalLabel}</span>
+                    <strong style="color:${isTotalApplied ? 'var(--positive)' : 'var(--text-main)'};">${formatMoney(totalPayoff)}</strong>
+                </button>
+            </div>
+        </div>
+    `;
+
+    box.querySelectorAll('[data-lumi-apply-amt]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const payKind = btn.getAttribute('data-lumi-pay-kind') || 'min';
+            const targetAmt = round2(parseFloat(btn.getAttribute('data-lumi-apply-amt')) || 0);
+            const targetExtra = round2(parseFloat(btn.getAttribute('data-lumi-apply-extra')) || 0);
+            const suggestedDesc = btn.getAttribute('data-lumi-apply-desc') || '';
+
+            if (typeof activeTxCurrency !== 'undefined' && activeTxCurrency !== 'COP') {
+                activeTxCurrency = 'COP';
+                document.querySelectorAll('#tx-currency-pills .pill-btn').forEach(b => {
+                    b.classList.toggle('active', b.getAttribute('data-curr') === 'COP');
+                });
+                document.getElementById('tx-currency-preview')?.classList.add('hidden');
+            }
+
+            // Si es Pago Total con compras diferidas pendientes, pasar a extraordinario para cerrarlas todas a $0
+            const payModeSel = document.getElementById('transfer-payment-mode');
+            if (payKind === 'total' && allPendingTxIds.length > 0 && payModeSel && payModeSel.value !== 'extraordinary') {
+                payModeSel.value = 'extraordinary';
+                document.getElementById('extraordinary-strategy-group')?.classList.remove('hidden');
+                if (typeof updateTransferAllocationUI === 'function') {
+                    updateTransferAllocationUI({ preserveSelection: false, keepProvidedAmount: true });
+                }
+            }
+
+            // Sincronizar checkboxes de compras diferidas/rotativas según el botón pulsado
+            const targetIds = new Set(payKind === 'total' ? allPendingTxIds : dueCycleTxIds);
+            const allocChecks = Array.from(document.querySelectorAll('#transfer-pending-items-list .transfer-alloc-check'));
+            if (allocChecks.length > 0 && targetIds.size > 0) {
+                allocChecks.forEach(cb => {
+                    cb.checked = targetIds.has(String(cb.value));
+                });
+                const badgeEl = document.getElementById('transfer-alloc-badge');
+                const checkedCount = allocChecks.filter(cb => cb.checked).length;
+                if (badgeEl) badgeEl.innerText = `${checkedCount}/${allocChecks.length} selec.`;
+            }
+
+            const extraInp = document.getElementById('transfer-extra-charges');
+            if (extraInp) {
+                extraInp.value = (targetExtra > 0 && targetExtra < targetAmt) ? formatNumberInput(targetExtra) : '';
+            }
+
+            const amtInp = document.getElementById('amount');
+            if (amtInp && targetAmt > 0) {
+                amtInp.value = formatNumberInput(targetAmt);
+                amtInp.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+
+            const descInp = document.getElementById('description');
+            if (descInp && !descInp.value.trim() && suggestedDesc) {
+                descInp.value = suggestedDesc;
+            }
+            if (typeof syncTransferAllocationSummary === 'function') {
+                syncTransferAllocationSummary(false);
+            }
+        });
+    });
+};
+
+// 1. Tip en Nuevo Gasto y Transferencia a Deudas
 window.renderLumiQuincenaTipTx = () => {
     const box = document.getElementById('lumi-quincena-tip-tx');
     if (!box) return;
     const typeVal = document.getElementById('type')?.value || 'expense';
+    if (typeVal === 'transfer') {
+        window.renderLumiDebtPaymentTipTx();
+        return;
+    }
     const dateVal = document.getElementById('trans-date')?.value || '';
     const accVal = document.getElementById('account')?.value || '';
     if (typeVal !== 'expense' || !dateVal || accVal === 'CxC_Gastos_Acompanante') {
@@ -11259,10 +11599,20 @@ window.renderLumiQuincenaTipCard = () => {
     box.innerHTML = window.buildLumiQuincenaTipHTML({ plan, label, payDay: payDay || null, amount: monthlyEst, customNote });
 };
 
+const lumiTipTxModal = document.getElementById('transaction-modal');
+if (lumiTipTxModal && !lumiTipTxModal.dataset.lumiTipObs) {
+    lumiTipTxModal.dataset.lumiTipObs = '1';
+    new MutationObserver(() => {
+        if (!lumiTipTxModal.classList.contains('hidden')) {
+            setTimeout(() => window.renderLumiQuincenaTipTx?.(), 60);
+        }
+    }).observe(lumiTipTxModal, { attributes: true, attributeFilter: ['class'] });
+}
+
 ['input', 'change'].forEach(evt => {
     document.addEventListener(evt, (e) => {
         const id = e.target?.id;
-        if (['type', 'trans-category', 'trans-date', 'amount', 'trans-recurrence'].includes(id)) window.renderLumiQuincenaTipTx();
+        if (['type', 'to-account', 'transfer-payment-mode', 'trans-category', 'trans-date', 'amount', 'trans-recurrence'].includes(id)) window.renderLumiQuincenaTipTx();
         if (['new-sub-name', 'new-sub-amount', 'new-sub-next-date'].includes(id)) window.renderLumiQuincenaTipSub();
         if (['new-cat-name', 'new-cat-limit', 'cat-edit-name-input', 'cat-general-limit-input', 'subcat-edit-name-input', 'subcat-general-limit-input'].includes(id)) window.renderLumiQuincenaTipCat();
         if (['new-debt-name', 'new-debt-original', 'new-debt-current', 'new-debt-total-quotes', 'new-debt-rate', 'new-debt-rate-type', 'new-debt-monthly-payment', 'new-debt-payment-day', 'new-debt-payroll'].includes(id)) window.renderLumiQuincenaTipDebt();
