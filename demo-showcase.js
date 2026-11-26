@@ -6,7 +6,7 @@
 (function initLumenWebShowcase() {
     'use strict';
 
-    // CONFIGURACIÓN: Reemplaza esta URL por tu enlace oficial de Google Play cuando publiques
+    // CONFIGURACIÓN: Enlace oficial de tu app en Google Play
     const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.funcionif.lumen';
     const PLAY_STORE_CTA_TEXT = 'Obtener Lumen ($29.900)';
 
@@ -25,6 +25,11 @@
 
     // 1. SANDBOX 100% EN MEMORIA RAM (no persiste al recargar ni ensucia el navegador del visitante)
     const ramStore = new Map();
+
+    const getCurrMonthId = () => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    };
 
     const seedRamStore = () => {
         ramStore.clear();
@@ -47,7 +52,9 @@
         ramStore.set('myFinancesTheme', bundle.theme || 'lumen');
         ramStore.set('myFinancesColorMode', bundle.colorMode || 'auto');
 
-        // Silenciar modales de onboarding/bienvenida para aterrizar directo en el Dashboard
+        // Aterrizar directo en el Dashboard sin popups automáticos al abrir la página
+        // (El banner "Cierre de Octubre listo" sigue visible en el inicio por si quieren abrirlo)
+        ramStore.set('myFinancesAutoRecapSeenMonth', getCurrMonthId());
         ramStore.set('myFinancesLastSeenVersion', demoVersion);
         ramStore.set('lumenRebrandSeen_v1', 'true');
         ramStore.set('myFinancesBioBannerSeen', 'true');
@@ -164,7 +171,7 @@
         }
     };
 
-    // 5. BARRA SUPERIOR DISCRETA DE MODO DEMO + BLOQUEO DE EXPORTACIÓN/PIN/BORRADO
+    // 5. TARJETA INTEGRADA EN EL FLUJO DEL INICIO (cero superposición sobre cabecera ni modales)
     const mountDemoShowcaseUI = () => {
         bindArchivedDemoHook();
 
@@ -175,30 +182,33 @@
 
         if (document.getElementById('lumen-demo-showcase-bar')) return;
 
-        // Estilos encapsulados para la barra superior de vitrina
         const styleEl = document.createElement('style');
         styleEl.id = 'lumen-demo-showcase-style';
         styleEl.textContent = `
             #lumen-demo-showcase-bar {
-                position: sticky;
-                top: 0;
-                z-index: 2500;
+                position: relative;
+                z-index: 1;
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
-                gap: 8px;
-                padding: calc(8px + env(safe-area-inset-top, 0px)) 14px 8px 14px;
+                gap: 10px;
+                margin: 0 0 12px 0;
+                padding: 10px 12px;
+                border-radius: 16px;
                 background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
                 color: #f8fafc;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-                box-shadow: 0 4px 16px rgba(15, 23, 42, 0.22);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
                 font-family: inherit;
+                box-sizing: border-box;
+                width: 100%;
             }
             .lumen-demo-left {
                 display: flex;
                 align-items: center;
-                gap: 7px;
+                gap: 8px;
                 min-width: 0;
+                flex: 1;
             }
             .lumen-demo-dot {
                 width: 8px;
@@ -208,10 +218,24 @@
                 box-shadow: 0 0 0 3px rgba(0, 196, 159, 0.25);
                 flex-shrink: 0;
             }
-            .lumen-demo-text {
-                font-size: 11.5px;
-                font-weight: 700;
-                color: #f1f5f9;
+            .lumen-demo-copy {
+                display: flex;
+                flex-direction: column;
+                min-width: 0;
+                line-height: 1.2;
+            }
+            .lumen-demo-title {
+                font-size: 12px;
+                font-weight: 800;
+                color: #f8fafc;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .lumen-demo-sub {
+                font-size: 10.5px;
+                font-weight: 500;
+                color: #94a3b8;
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
@@ -227,7 +251,7 @@
                 color: #e2e8f0;
                 border: 1px solid rgba(255, 255, 255, 0.16);
                 border-radius: 999px;
-                padding: 5px 9px;
+                padding: 6px 10px;
                 font-size: 11px;
                 font-weight: 700;
                 cursor: pointer;
@@ -243,7 +267,7 @@
                 font-weight: 800;
                 text-decoration: none;
                 white-space: nowrap;
-                box-shadow: 0 4px 12px rgba(0, 196, 159, 0.35);
+                box-shadow: 0 4px 12px rgba(0, 196, 159, 0.3);
             }
         `;
         document.head.appendChild(styleEl);
@@ -255,14 +279,24 @@
         bar.innerHTML = `
             <div class="lumen-demo-left">
                 <span class="lumen-demo-dot"></span>
-                <span class="lumen-demo-text">Demo interactiva (datos 2026)</span>
+                <div class="lumen-demo-copy">
+                    <span class="lumen-demo-title">Modo Demo</span>
+                    <span class="lumen-demo-sub">Datos ficticios 2026</span>
+                </div>
             </div>
             <div class="lumen-demo-actions">
                 <button type="button" id="btn-lumen-demo-reset" title="Restaurar datos de prueba">Reiniciar</button>
                 <a id="btn-lumen-demo-cta" href="${PLAY_STORE_URL}" target="_blank" rel="noopener noreferrer">Obtener App</a>
             </div>
         `;
-        document.body.prepend(bar);
+
+        // Insertar dentro de <main> (debajo de la cabecera fija y detrás de cualquier modal)
+        const mainEl = document.querySelector('main');
+        if (mainEl) {
+            mainEl.prepend(bar);
+        } else {
+            document.body.prepend(bar);
+        }
 
         document.getElementById('btn-lumen-demo-reset')?.addEventListener('click', () => {
             window.location.reload();
