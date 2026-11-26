@@ -304,6 +304,56 @@
                 visibility: hidden !important;
                 pointer-events: none !important;
             }
+            #lumen-demo-drawer-card {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+                margin: 8px 0 2px 0;
+                padding: 9px 11px;
+                border-radius: 14px;
+                background: color-mix(in srgb, var(--accent) 8%, var(--card-inner-bg));
+                border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-color));
+                box-sizing: border-box;
+                width: 100%;
+                flex-shrink: 0;
+            }
+            .lumen-demo-drawer-left {
+                display: flex;
+                align-items: center;
+                gap: 7px;
+                min-width: 0;
+                flex: 1;
+            }
+            .lumen-demo-drawer-title {
+                display: block;
+                font-size: 11.5px;
+                font-weight: 800;
+                color: var(--text-main);
+                line-height: 1.2;
+            }
+            .lumen-demo-drawer-sub {
+                display: block;
+                font-size: 10px;
+                font-weight: 600;
+                color: var(--text-muted);
+                line-height: 1.2;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            #btn-lumen-demo-drawer-cta {
+                background: color-mix(in srgb, var(--accent) 14%, var(--card-bg));
+                color: var(--accent);
+                border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+                border-radius: 999px;
+                padding: 5px 10px;
+                font-size: 11px;
+                font-weight: 800;
+                text-decoration: none;
+                white-space: nowrap;
+                flex-shrink: 0;
+            }
         `;
         document.head.appendChild(styleEl);
 
@@ -334,7 +384,7 @@
         spacer.setAttribute('aria-hidden', 'true');
         const headerEl = document.querySelector('header');
         if (headerEl && headerEl.parentNode) {
-            headerEl.insertAdjacentElement('afterend', spacer);
+            headerEl.insertAdjacentElement('beforebegin', spacer);
         } else {
             document.body.prepend(spacer);
         }
@@ -366,6 +416,23 @@
             const topBarEl = document.querySelector('.top-bar');
             if (topBarEl) ro.observe(topBarEl);
             ro.observe(bar);
+        }
+
+        const drawerScrollEl = document.querySelector('#side-drawer .drawer-scroll');
+        if (drawerScrollEl && !document.getElementById('lumen-demo-drawer-card')) {
+            const drawerCard = document.createElement('div');
+            drawerCard.id = 'lumen-demo-drawer-card';
+            drawerCard.innerHTML = `
+                <div class="lumen-demo-drawer-left">
+                    <span class="lumen-demo-dot"></span>
+                    <div style="min-width:0;">
+                        <span class="lumen-demo-drawer-title">Modo Demo</span>
+                        <span class="lumen-demo-drawer-sub">Un solo pago de por vida</span>
+                    </div>
+                </div>
+                <a id="btn-lumen-demo-drawer-cta" href="${PLAY_STORE_URL}" target="_blank" rel="noopener noreferrer">Obtener App</a>
+            `;
+            drawerScrollEl.prepend(drawerCard);
         }
 
         document.getElementById('btn-lumen-demo-reset')?.addEventListener('click', () => {
