@@ -8919,7 +8919,8 @@ const renderTxTemplatesStrip = () => {
         wrap = document.createElement('div');
         wrap.id = 'tx-templates-strip';
         wrap.className = 'tx-templates-bar';
-        const segGroup = document.getElementById('tx-type-segmented')?.closest('.form-group, .form-row') || txForm.firstElementChild;
+        const segEl = document.getElementById('tx-type-segmented');
+        const segGroup = segEl?.closest('.form-row') || segEl?.closest('.form-group') || txForm.firstElementChild;
         if (segGroup) segGroup.insertAdjacentElement('afterend', wrap);
         else txForm.prepend(wrap);
 
@@ -9016,7 +9017,7 @@ const renderTxTemplatesStrip = () => {
 
                 if (!Array.isArray(financeData.templates)) financeData.templates = [];
                 const dupIdx = financeData.templates.findIndex(t =>
-                    t.type === curType && t.label.toLowerCase() === tplLabel.toLowerCase()
+                    t.type === curType && String(t.label || t.name || '').toLowerCase() === tplLabel.toLowerCase()
                 );
 
                 const tplObj = {
@@ -9067,7 +9068,7 @@ const renderTxTemplatesStrip = () => {
     const chipsHtml = list.map(t => `
         <div class="tx-template-chip">
             <button type="button" class="tx-template-apply" data-apply-tpl="${escA(t.id)}">
-                <span>${esc(t.label)}</span>
+                <span>${esc(t.label || t.name || t.description || 'Plantilla')}</span>
                 ${t.amount > 0 ? `<small>${formatCompact(t.amount)}</small>` : ''}
             </button>
             <button type="button" class="tx-template-del" data-del-tpl="${escA(t.id)}" aria-label="Eliminar plantilla">×</button>
