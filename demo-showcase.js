@@ -36,7 +36,19 @@
         const demoVersion = String(bundle.version || '2.2.3');
         const currMonthId = getCurrMonthId();
 
-        ramStore.set('myFinances', JSON.stringify(bundle.finances || {}));
+        const demoFinances = Object.assign({}, bundle.finances || {}, {
+            tripMode: {
+                active: false,
+                name: '',
+                tag: '',
+                budget: 0,
+                isolateBudget: true,
+                linkedPocketId: null,
+                isShared: false,
+                companionName: ''
+            }
+        });
+        ramStore.set('myFinances', JSON.stringify(demoFinances));
         if (bundle.salary) ramStore.set('myFinancesSalary', JSON.stringify(bundle.salary));
         if (bundle.taxParams) ramStore.set('myFinancesTaxParams', JSON.stringify(bundle.taxParams));
         if (Array.isArray(bundle.cdts)) ramStore.set('lumen_cdts_v1', JSON.stringify(bundle.cdts));
@@ -448,7 +460,8 @@
             '#btn-decrypt-accountant-csv': 'Desbloquear Paquete Contador',
             '#btn-archive-year': 'Cierre y archivado de año',
             '#btn-wipe-data': 'Reiniciar base de datos local',
-            '#btn-lock-app-profile': 'Bloqueo con PIN y Biometría'
+            '#btn-lock-app-profile': 'Bloqueo con PIN y Biometría',
+            '#btn-continue-trip-setup': 'Modo Viaje y Liquidación 50/50'
         };
 
         document.addEventListener('click', (e) => {
@@ -478,6 +491,9 @@
                 if (e.target.closest(selector)) {
                     e.preventDefault();
                     e.stopImmediatePropagation();
+                    if (selector === '#btn-continue-trip-setup') {
+                        document.getElementById('trip-mode-modal')?.classList.add('hidden');
+                    }
                     openDemoPlayPrompt(label);
                     return;
                 }
@@ -489,6 +505,11 @@
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 openDemoPlayPrompt('Bóveda cifrada AES-256 con PIN y Biometría');
+            } else if (e.target && e.target.id === 'trip-mode-form') {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                document.getElementById('trip-mode-modal')?.classList.add('hidden');
+                openDemoPlayPrompt('Modo Viaje y Liquidación 50/50');
             }
         }, true);
     };
