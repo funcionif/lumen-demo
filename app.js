@@ -1433,7 +1433,7 @@ document.getElementById('btn-wipe-data-fallback')?.addEventListener('click', asy
         window.openBentoConfirmModal({
             title: 'Borrar datos locales',
             subtitle: 'Acción irreversible',
-            message: 'Al no tener tu PIN, clave de recuperación ni biometría, la única salida es borrar todos tus datos para empezar de cero. ¿Estás seguro?',
+            message: 'Al no tener tu PIN, clave de recuperación ni biometría, la única salida es borrar todos tus datos para empezar de cero. ¿Confirmas que deseas continuar?',
             confirmText: 'Borrar y reiniciar',
             cancelText: 'Cancelar',
             danger: true,
@@ -1647,7 +1647,7 @@ const initOnboardingCarousel = () => {
                     </svg>
                 </div>
                 <h2 class="onb-slide-title" style="font-size:25px;">¡Hola!</h2>
-                <p class="onb-slide-desc">Bienvenido a <b>Lumen</b>, tu centro privado para controlar dinero, deudas y metas desde tu dispositivo.</p>
+                <p class="onb-slide-desc">Te damos la bienvenida a <b>Lumen</b>, tu centro privado para controlar dinero, deudas y metas desde tu dispositivo.</p>
                 <button type="button" id="btn-onb-start-tour" class="btn btn-primary" style="width:100%; margin-top:24px; padding:13px; font-size:14px;">Saber cómo</button>
             </div>
             <div style="padding-top:14px;">
@@ -2053,7 +2053,7 @@ window.attemptCloseModals = () => {
         const cm = document.getElementById(cId);
         if (cm && !cm.classList.contains('hidden')) {
             if ((cId === 'cat-months-modal' || cId === 'subcat-months-modal') && hasUnsavedChanges) {
-                requestUnsavedDiscard('Tienes cambios sin guardar en el presupuesto. ¿Seguro que quieres salir?', () => {
+                requestUnsavedDiscard('Tienes cambios sin guardar en el presupuesto. ¿Confirmas que quieres salir?', () => {
                     hasUnsavedChanges = false;
                     cm.classList.add('hidden');
                 });
@@ -2109,7 +2109,7 @@ window.attemptCloseModals = () => {
     }
 
     if (isAnyModalOpen() && hasUnsavedChanges) {
-        requestUnsavedDiscard('Tienes cambios sin guardar en un formulario. ¿Estás seguro de que quieres salir y perderlos?', () => {
+        requestUnsavedDiscard('Tienes cambios sin guardar en un formulario. ¿Confirmas que quieres salir y perderlos?', () => {
             hasUnsavedChanges = false;
             forceCloseAllModals();
         });
@@ -8919,8 +8919,7 @@ const renderTxTemplatesStrip = () => {
         wrap = document.createElement('div');
         wrap.id = 'tx-templates-strip';
         wrap.className = 'tx-templates-bar';
-        const segEl = document.getElementById('tx-type-segmented');
-        const segGroup = segEl?.closest('.form-row') || segEl?.closest('.form-group') || txForm.firstElementChild;
+        const segGroup = document.getElementById('tx-type-segmented')?.closest('.form-group, .form-row') || txForm.firstElementChild;
         if (segGroup) segGroup.insertAdjacentElement('afterend', wrap);
         else txForm.prepend(wrap);
 
@@ -9017,7 +9016,7 @@ const renderTxTemplatesStrip = () => {
 
                 if (!Array.isArray(financeData.templates)) financeData.templates = [];
                 const dupIdx = financeData.templates.findIndex(t =>
-                t.type === curType && String(t.label || t.name || '').toLowerCase() === tplLabel.toLowerCase()
+                    t.type === curType && t.label.toLowerCase() === tplLabel.toLowerCase()
                 );
 
                 const tplObj = {
@@ -9068,7 +9067,7 @@ const renderTxTemplatesStrip = () => {
     const chipsHtml = list.map(t => `
         <div class="tx-template-chip">
             <button type="button" class="tx-template-apply" data-apply-tpl="${escA(t.id)}">
-                <span>${esc(t.label || t.name || t.description || 'Plantilla')}</span>
+                <span>${esc(t.label)}</span>
                 ${t.amount > 0 ? `<small>${formatCompact(t.amount)}</small>` : ''}
             </button>
             <button type="button" class="tx-template-del" data-del-tpl="${escA(t.id)}" aria-label="Eliminar plantilla">×</button>
@@ -10184,7 +10183,7 @@ function executeMasterRecalculation() {
                     window.openBentoConfirmModal({
                         title: 'Eliminar título de Renta Fija',
                         subtitle: targetItem ? `${targetItem.tipo} • ${targetItem.entidad}` : 'CDT / CDAT',
-                        message: `¿Seguro que deseas eliminar este registro${targetItem ? ` de <b>${escC(targetItem.entidad)}</b>` : ''}? Recuerda registrar primero el ingreso en tu cuenta si ya venció.`,
+                        message: `¿Confirmas que deseas eliminar este registro${targetItem ? ` de <b>${escC(targetItem.entidad)}</b>` : ''}? Recuerda registrar primero el ingreso en tu cuenta si ya venció.`,
                         confirmText: 'Sí, eliminar',
                         cancelText: 'Cancelar',
                         danger: true,

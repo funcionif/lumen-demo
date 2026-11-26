@@ -3502,10 +3502,7 @@ body.exclusive-mode-active .exclusive-feature-flex {
    ========================================== */
 .tx-type-segmented {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
+    grid-template-columns: repeat(3, 1fr);
     gap: 6px;
     padding: 5px;
     border-radius: 16px;
@@ -4586,11 +4583,6 @@ body .fab-container #btn-open-lumi.lumi-satellite-btn:active {
    ========================================== */
 .tx-templates-bar {
     margin: -2px 0 12px 0;
-    grid-column: 1 / -1;
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
-    overflow: hidden;
 }
 
 .tx-templates-scroll {

@@ -976,7 +976,7 @@ const updateRolloverHint = (selectId, hintBoxId, titleId, descId) => {
         titleEl.innerText = isExp ? 'Compensar Sobrante y Déficit (+/-)' : 'Compensar Faltante y Excedente (+/-)';
         descEl.innerText = isExp 
             ? 'Igual que el anterior, pero si te pasas y gastas $120.000, el próximo mes tu límite bajará a $80.000 para obligarte a compensar (ideal para servicios).' 
-            : 'Igual que el anterior, pero si tienes un buen mes y ganas $120.000, el otro mes tu meta bajará a $80.000 porque ya vas adelantado en el año.';
+            : 'Igual que el anterior, pero si tienes un buen mes y ganas $120.000, el otro mes tu meta bajará a $80.000 porque ya llevas ventaja en el año.';
     }
 };
 
@@ -1990,7 +1990,7 @@ window.deleteCategory = (catName, type) => {
     } else {
         openCategoryDeleteModal({
             title: 'Eliminar categoría',
-            bodyHtml: `<p style="margin: 0;">¿Estás seguro de eliminar la categoría <strong style="color: var(--text-main);">${escHtml(catName)}</strong> y todas sus subcategorías? Esta acción no se puede deshacer.</p>`,
+            bodyHtml: `<p style="margin: 0;">¿Confirmas que deseas eliminar la categoría <strong style="color: var(--text-main);">${escHtml(catName)}</strong> y todas sus subcategorías? Esta acción no se puede deshacer.</p>`,
             showSelect: false,
             confirmLabel: 'Eliminar',
             onConfirm: () => executeCategoryDelete(null)
@@ -2141,7 +2141,7 @@ window.deleteSubcategory = (catName, subName, type) => {
     } else {
         openCategoryDeleteModal({
             title: 'Eliminar subcategoría',
-            bodyHtml: `<p style="margin: 0;">¿Estás seguro de eliminar la subcategoría <strong style="color: var(--text-main);">${escHtml(subName)}</strong>?</p>`,
+            bodyHtml: `<p style="margin: 0;">¿Confirmas que deseas eliminar la subcategoría <strong style="color: var(--text-main);">${escHtml(subName)}</strong>?</p>`,
             showSelect: false,
             confirmLabel: 'Eliminar',
             onConfirm: executeSubcategoryDelete
@@ -6593,7 +6593,7 @@ window.deletePocket = (id) => {
         window.openBentoConfirmModal({
             title: 'Eliminar bolsillo',
             subtitle: pocketName,
-            message: `¿Seguro que deseas eliminar el bolsillo <b>${escP(pocketName)}</b>? Sus movimientos históricos conservarán su nombre en el historial.`,
+            message: `¿Confirmas que deseas eliminar el bolsillo <b>${escP(pocketName)}</b>? Sus movimientos históricos conservarán su nombre en el historial.`,
             confirmText: 'Eliminar',
             cancelText: 'Cancelar',
             danger: true,
@@ -7504,7 +7504,7 @@ document.getElementById('widget-financial-health')?.addEventListener('click', ()
             estEl.innerHTML = `<div style="display: flex; align-items: flex-start; gap: 8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--negative)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 1px;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span>Tu límite bancario da espacio, pero <b>tu flujo de caja real es negativo</b> debido a tus altos gastos fijos. No tomes más deuda.</span></div>`;
             estEl.style.borderLeftColor = 'var(--negative)';
         } else {
-            estEl.innerHTML = `<div style="display: flex; align-items: flex-start; gap: 8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--negative)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 1px;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span>Estás sobreendeudado para los estándares bancarios (déficit de <b style="white-space: nowrap;">${formatMoney(Math.abs(mathAvailableDebt))}</b> frente al tope del 30%).</span></div>`;
+            estEl.innerHTML = `<div style="display: flex; align-items: flex-start; gap: 8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--negative)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 1px;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span>Tu endeudamiento supera los estándares bancarios (déficit de <b style="white-space: nowrap;">${formatMoney(Math.abs(mathAvailableDebt))}</b> frente al tope del 30%).</span></div>`;
             estEl.style.borderLeftColor = 'var(--negative)';
         }
     }
@@ -10417,7 +10417,7 @@ document.addEventListener('submit', (e) => {
                     document.body.appendChild(welcomeModal);
                 }
                 const escWel = window.escapeHtml || ((s) => String(s ?? ''));
-                document.getElementById('trip-shared-welcome-desc').innerHTML = `Disfruta tu viaje a <b>${escWel(name)}</b> al máximo, pero sé disciplinado y registra todos los gastos compartidos con <b>${escWel(companionName)}</b> para cruzar cuentas al final.`;
+                document.getElementById('trip-shared-welcome-desc').innerHTML = `Disfruta tu viaje a <b>${escWel(name)}</b> al máximo, mantén la disciplina y registra todos los gastos compartidos con <b>${escWel(companionName)}</b> para cruzar cuentas al final.`;
                 document.getElementById('btn-close-trip-shared-welcome').onclick = () => welcomeModal.classList.add('hidden');
                 welcomeModal.classList.remove('hidden');
             }, 180);
@@ -11821,13 +11821,13 @@ const buildProactiveClosingData = (refDate = currentDate) => {
 
     let achievement = null;
     if (savingsRate >= 25 && flow.inc > 0) {
-        achievement = { icon: 'award', color: 'var(--positive)', title: 'Ahorrador Élite', text: `Retuviste el ${String(savingsRate).replace('.', ',')}% de tus ingresos. ¡Nivel superior!` };
+        achievement = { icon: 'award', color: 'var(--positive)', title: 'Ahorro Élite', text: `Retuviste el ${String(savingsRate).replace('.', ',')}% de tus ingresos. ¡Nivel superior!` };
     } else if (debtStatus === 'good' && debtPct >= 10) {
         achievement = { icon: 'trending-up', color: 'var(--positive)', title: 'Impulso Anti-Deuda', text: `Redujiste ${String(debtPct).replace('.', ',')}% de tus pasivos totales en 30 días.` };
     } else if (withinBudgetAll) {
         achievement = { icon: 'target', color: 'var(--positive)', title: 'Presupuesto Impecable', text: `Cumpliste al 100% tus topes sin pasarte en ninguna categoría.` };
     } else if (flow.exp > 0 && hasPriorActivity && expChangePct <= -8) {
-        achievement = { icon: 'check', color: 'var(--positive)', title: 'Maestro del Recorte', text: `Gastaste ${String(Math.abs(expChangePct)).replace('.', ',')}% menos que el mes anterior.` };
+        achievement = { icon: 'check', color: 'var(--positive)', title: 'Recorte Maestro', text: `Gastaste ${String(Math.abs(expChangePct)).replace('.', ',')}% menos que el mes anterior.` };
     } else if (surplus > 0) {
         achievement = { icon: 'check', color: 'var(--positive)', title: 'Cierre en Verde', text: `Cerraste con flujo positivo de +${formatCompact(surplus)}. ¡Buen ritmo!` };
     } else {
@@ -12283,7 +12283,7 @@ const renderMonthlyRecapView = () => {
     let slides = [];
 
     if (activeRecapMode === 'monthly') {
-        if (titleEl) titleEl.textContent = `¡Bienvenido a ${data.incomingMonthCap}!`;
+        if (titleEl) titleEl.textContent = `¡Hola, ${data.incomingMonthCap}!`;
         if (subEl) {
             subEl.textContent = isJanuary
                 ? `Parte 1 de 2 • Cierre de ${data.closedMonthCap} ${data.closedYear}`
@@ -14666,7 +14666,7 @@ document.getElementById('btn-archive-year')?.addEventListener('click', () => {
         bodyEl.innerHTML = `
             <p style="margin-bottom: 8px;">Se van a comprimir todos los movimientos cerrados del año <strong style="color: var(--text-main);">${targetYear}</strong>.</p>
             <p style="margin-bottom: 8px;">Se reemplazarán por saldos iniciales consolidados en <strong style="color: var(--text-main);">localStorage</strong> y el historial detallado se moverá silenciosamente a la base de datos profunda (<strong style="color: var(--text-main);">IndexedDB</strong>).</p>
-            <p style="margin: 0; color: var(--text-main); font-weight: 700;">¿Estás completamente seguro de continuar?</p>
+            <p style="margin: 0; color: var(--text-main); font-weight: 700;">¿Confirmas que deseas continuar?</p>
         `;
     }
     confirmActions?.classList.remove('hidden');

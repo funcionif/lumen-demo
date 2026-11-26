@@ -289,7 +289,7 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
         if (/\b(papelera|borre por error|restaurar movimiento)\b/.test(q) || /\b(recuperar|elimine|borre)\b/.test(q) && /\b(movimiento|gasto|ingreso|registro|transaccion|error)\b/.test(q)) {
             return {
                 title: 'Recuperar movimientos eliminados',
-                answer: `<span style="color:var(--positive);">${SVG.ok}</span> Tranquilo, no tienes que volver a registrar eso a mano. Lumen tiene una papelera.<br><br>1. Abre el <b>Menú principal</b> (las tres rayitas arriba a la izquierda).<br>2. Baja hasta Sistema y Ayuda, y toca <b>Papelera</b>.<br>3. Busca el movimiento que borraste y presiona "Restaurar".`
+                answer: `<span style="color:var(--positive);">${SVG.ok}</span> No te preocupes, no tienes que volver a registrar eso a mano. Lumen tiene una papelera.<br><br>1. Abre el <b>Menú principal</b> (las tres rayitas arriba a la izquierda).<br>2. Baja hasta Sistema y Ayuda, y toca <b>Papelera</b>.<br>3. Busca el movimiento que borraste y presiona "Restaurar".`
             };
         }
 
@@ -1032,7 +1032,7 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
             const pWants = 100 - pNeeds;
             return {
                 title: 'Tu Proporción de Gasto (Regla 50/30/20)',
-                answer: `<span style="color:var(--chart);">${SVG.chart}</span> Esta regla sugiere dividir tus ingresos así: 50% en necesidades básicas, 30% en gustos y 20% en ahorro/deudas.<br><br>De lo que has gastado este mes (<b>${fmt(total)}</b>):<br>• <b>Gastos fijos / esenciales:</b> ${pNeeds}% (${fmt(needs)})<br>• <b>Gastos variables / gustos:</b> ${pWants}% (${fmt(wants)})${renderTip('Si tus gastos fijos pesan demasiado, queda poco margen para ahorrar sin sentirte apretado.')}`
+                answer: `<span style="color:var(--chart);">${SVG.chart}</span> Esta regla sugiere dividir tus ingresos así: 50% en necesidades básicas, 30% en gustos y 20% en ahorro/deudas.<br><br>De lo que has gastado este mes (<b>${fmt(total)}</b>):<br>• <b>Gastos fijos / esenciales:</b> ${pNeeds}% (${fmt(needs)})<br>• <b>Gastos variables / gustos:</b> ${pWants}% (${fmt(wants)})${renderTip('Si tus gastos fijos pesan demasiado, queda poco margen para ahorrar con holgura.')}`
             };
         }
 
@@ -1268,14 +1268,14 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
 
             if (pctUsed > monthElapsedPct + 10) {
                 return {
-                    title: 'Vas un poco acelerado',
-                    answer: `<span style="color:var(--warning);">${SVG.warn}</span> Vamos al <b>${monthElapsedPct}%</b> del mes, pero ya te consumiste el <b>${pctUsed}%</b> de tu presupuesto (gastaste <b>${fmt(totalSpent)}</b> de ${fmt(totalLim)}).<br><br>Todavía te quedan <strong style="color:var(--positive);">${fmt(rem)}</strong> disponibles, pero toca bajar el ritmo si quieres llegar holgado a fin de mes.`
+                    title: 'Tu ritmo de gasto va alto',
+                    answer: `<span style="color:var(--warning);">${SVG.warn}</span> Vamos al <b>${monthElapsedPct}%</b> del mes, pero ya te consumiste el <b>${pctUsed}%</b> de tu presupuesto (gastaste <b>${fmt(totalSpent)}</b> de ${fmt(totalLim)}).<br><br>Todavía te quedan <strong style="color:var(--positive);">${fmt(rem)}</strong> disponibles, pero toca bajar el ritmo si quieres llegar con holgura a fin de mes.`
                 };
             }
 
             return {
                 title: 'Presupuesto bajo control',
-                answer: `<span style="color:var(--positive);">${SVG.ok}</span> ¡Vas a excelente ritmo! Vamos al <b>${monthElapsedPct}%</b> del mes y has consumido el <b>${pctUsed}%</b> de tu presupuesto (<b>${fmt(totalSpent)}</b> de ${fmt(totalLim)}).<br><br>Te quedan <strong style="color:var(--positive);">${fmt(rem)}</strong> disponibles para moverte tranquilo.`
+                answer: `<span style="color:var(--positive);">${SVG.ok}</span> ¡Vas a excelente ritmo! Vamos al <b>${monthElapsedPct}%</b> del mes y has consumido el <b>${pctUsed}%</b> de tu presupuesto (<b>${fmt(totalSpent)}</b> de ${fmt(totalLim)}).<br><br>Te quedan <strong style="color:var(--positive);">${fmt(rem)}</strong> disponibles para cerrar el mes con tranquilidad.`
             };
         }
 
@@ -1286,7 +1286,7 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
                 if (activeDays.length === 0) {
                     return {
                         title: 'Mapa de calor en verde',
-                        answer: `<span style="color:var(--positive);">${SVG.ok}</span> ¡Vas invicto! Llevas <b>${hm.zeroSpendDays} días</b> en este mes sin hacer gastos variables.`
+                        answer: `<span style="color:var(--positive);">${SVG.ok}</span> ¡Racha impecable! Llevas <b>${hm.zeroSpendDays} días</b> en este mes sin hacer gastos variables.`
                     };
                 }
                 const worst = activeDays[0];
