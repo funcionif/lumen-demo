@@ -385,6 +385,28 @@
         };
 
         document.addEventListener('click', (e) => {
+            if (e.target.closest('#drawer-share-app')) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                document.getElementById('side-drawer')?.classList.add('closed');
+                document.getElementById('side-drawer-backdrop')?.classList.add('hidden');
+
+                const demoShareUrl = 'https://funcionif.github.io/lumen-demo/';
+                const shareText = `Conoce *Lumen*, una app colombiana para manejar tus finanzas personales, tarjetas, nómina y 4x1000 de forma 100% privada (sin conectar claves bancarias).\n\nPrueba la demo interactiva aquí (sin registro):\n${demoShareUrl}\n\nDescarga la App Lumen en Google Play (un solo pago de por vida, sin suscripciones):\n${PLAY_STORE_URL}`;
+
+                if (navigator.share) {
+                    navigator.share({
+                        title: 'Lumen • Finanzas Personales',
+                        text: shareText
+                    }).catch(() => {});
+                } else if (navigator.clipboard) {
+                    navigator.clipboard.writeText(shareText)
+                        .then(() => alert('Mensaje de invitación copiado al portapapeles.'))
+                        .catch(() => {});
+                }
+                return;
+            }
+
             for (const [selector, label] of Object.entries(blockedButtons)) {
                 if (e.target.closest(selector)) {
                     e.preventDefault();
