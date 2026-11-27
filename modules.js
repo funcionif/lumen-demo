@@ -14896,7 +14896,15 @@ const showSyncRatesResult = (isSuccess, title, htmlBody) => {
 document.getElementById('close-sync-rates-modal-btn')?.addEventListener('click', closeSyncRatesModal);
 document.getElementById('btn-done-sync-rates')?.addEventListener('click', closeSyncRatesModal);
 
+let lastRatesSyncAt = 0;
 document.getElementById('btn-sync-rates')?.addEventListener('click', async (e) => {
+    const nowTs = Date.now();
+    if (nowTs - lastRatesSyncAt < 30000) {
+        const waitSec = Math.ceil((30000 - (nowTs - lastRatesSyncAt)) / 1000);
+        alert(`Tasas consultadas recientemente. Espera ${waitSec} s para volver a sincronizar.`);
+        return;
+    }
+    lastRatesSyncAt = nowTs;
     const btn = e.currentTarget;
     const originalText = btn.innerHTML;
     btn.innerHTML = `<span style="display:inline-flex; align-items:center; justify-content:center; gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg><span>Consultando...</span></span>`;
