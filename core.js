@@ -6041,20 +6041,16 @@ const computeSafeToSpendToday = (monthId, currSnap) => {
 
     let unpaidAccountMgmtFees = 0;
     if (typeof evaluateAccountMgmtFeeCycle === 'function') {
-        const feeCatObj = (financeData.categories?.expense || []).find(c => /cuotas\s*\/\s*intereses/i.test(stripLeadingEmoji(c.name)));
-        const feeCatBudgeted = feeCatObj ? getCategoryLimitForMonth(feeCatObj, mIdx, mYear) > 0 : false;
-        if (!feeCatBudgeted) {
-            (financeData.customAccounts || []).filter(a => isAccountMgmtFeeEligible(a) && a.hasMgmtFee).forEach(acc => {
-                const hasManualSub = (financeData.subscriptions || []).some(s =>
-                    s.status === 'active' && String(s.accountId) === String(acc.id) && /manejo/i.test(s.name || '')
-                );
-                if (hasManualSub) return;
-                const st = evaluateAccountMgmtFeeCycle(acc, monthId, currSnap, currentDate);
-                if (st.enabled && st.status === 'pending' && st.amount > 0) {
-                    unpaidAccountMgmtFees = round2(unpaidAccountMgmtFees + st.amount);
-                }
-            });
-        }
+        (financeData.customAccounts || []).filter(a => isAccountMgmtFeeEligible(a) && a.hasMgmtFee).forEach(acc => {
+            const hasManualSub = (financeData.subscriptions || []).some(s =>
+                s.status === 'active' && String(s.accountId) === String(acc.id) && /manejo/i.test(s.name || '')
+            );
+            if (hasManualSub) return;
+            const st = evaluateAccountMgmtFeeCycle(acc, monthId, currSnap, currentDate);
+            if (st.enabled && st.status === 'pending' && st.amount > 0) {
+                unpaidAccountMgmtFees = round2(unpaidAccountMgmtFees + st.amount);
+            }
+        });
     }
 
     const obligations = round2(pendingExp + budgetRemaining + monthlyDebtPayments + unbudgetedRecurringDue + unpaidAccountMgmtFees);
@@ -7880,8 +7876,27 @@ const evaluateAccountMgmtFeeCycle = (acc, monthId, currSnap = null, refDate = cu
         }
     }
 
+    if (isBeforeConfig) {
+        return {
+            enabled: true,
+            status: 'before_config',
+            amount,
+            day: dueDate.getDate(),
+            dueDate,
+            dueDateStr,
+            balance,
+            autoCharge,
+            waived: false,
+            waiverLabel: 'Inicia el próximo mes',
+            isDueOrPast,
+            isBeforeConfig: true,
+            insufficientFunds: false,
+            canAutoCharge: false
+        };
+    }
+
     const insufficientFunds = (acc.accountSubType || 'savings') !== 'checking' && balance < amount;
-    const canAutoCharge = autoCharge && isDueOrPast && !isBeforeConfig && !insufficientFunds;
+    const canAutoCharge = autoCharge && isDueOrPast && !insufficientFunds;
 
     return {
         enabled: true,
@@ -7921,7 +7936,10 @@ const chargeAccountMgmtFee = (accountId, targetMonthId = null, { isAuto = false,
     }
 
     const now = new Date();
-    const txDateObj = (isAuto && st.dueDate && st.dueDate <= now) ? st.dueDate : now;
+    const nowMonthId = getMonthId(now);
+    const txDateObj = ((isAuto && st.dueDate && st.dueDate <= now) || (mId !== nowMonthId && st.dueDate))
+        ? st.dueDate
+        : now;
     const usedIds = new Set((financeData.transactions || []).map(t => Number(t.id)));
     let nextId = txDateObj.getTime();
     while (usedIds.has(nextId)) nextId += 1;

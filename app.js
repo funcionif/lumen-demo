@@ -4171,7 +4171,7 @@ const renderDashboardCardsSummary = (balances) => {
 const renderDashboardDebtsSummary = (balances) => {
     const widget = document.getElementById('dashboard-debts-widget');
     const badge = document.getElementById('dash-debts-count-badge');
-    const list = document.getElementById('dashboard-debts-list');
+    const list = document.getElementById('dash-debts-list') || document.getElementById('dashboard-debts-list');
     if (!widget || !list) return;
 
     const debts = sortAlphabeticallyWithDefault(financeData.customAccounts.filter(a => a.category === 'debt'));
@@ -4666,7 +4666,7 @@ const renderHistoryTagsUI = (monthId, filteredTxs) => {
     if (stripEl) {
         const monthTagCounts = {};
         financeData.transactions.forEach(t => {
-            if (!t.isDeleted && t.monthId === monthId && Array.isArray(t.tags)) {
+            if (!t.isDeleted && getTxMonthId(t) === monthId && Array.isArray(t.tags)) {
                 t.tags.forEach(tg => {
                     monthTagCounts[tg] = (monthTagCounts[tg] || 0) + 1;
                 });
@@ -5583,7 +5583,11 @@ form?.addEventListener('submit', (e) => {
             linkedAssetId: oldT.linkedAssetId || null,
             linkedObligationId: oldT.linkedObligationId || null,
             assetExpenseApplied: round2(oldT.assetExpenseApplied || 0),
-            assetObligationPaidYear: oldT.assetObligationPaidYear || null
+            assetObligationPaidYear: oldT.assetObligationPaidYear || null,
+            isGmfTax: !!oldT.isGmfTax,
+            isAccountMgmtFee: !!oldT.isAccountMgmtFee,
+            mgmtFeeAccountId: oldT.mgmtFeeAccountId || null,
+            mgmtFeeMonthId: oldT.mgmtFeeMonthId || ''
         };
         }
         if (oldT && oldT.type === 'transfer' && typeof revertTransferAllocation === 'function') revertTransferAllocation(oldT);
@@ -5607,8 +5611,44 @@ form?.addEventListener('submit', (e) => {
     for (let step = 0; step < recCount; step++) {
         const txDate = (typeof advanceDateByRecurrence === 'function') ? advanceDateByRecurrence(baseDateObj, recurrence, step) : baseDateObj;
         const instStatus = step === 0 ? status : 'pending';
+        let resolvedTxId = txDate.getTime() + step + Math.floor(Math.random() * 500);
+        if (preservedEditMeta && step === 0) {
+            const origDt = new Date(Number(preservedEditMeta.id));
+            const sameDate = !Number.isNaN(origDt.getTime())
+                && origDt.toLocaleDateString('en-CA') === txDate.toLocaleDateString('en-CA')
+                && origDt.toTimeString().slice(0, 5) === txDate.toTimeString().slice(0, 5);
+            resolvedTxId = sameDate ? preservedEditMeta.id : resolvedTxId;
+
+            if (String(resolvedTxId) !== String(preservedEditMeta.id)) {
+                const oldIdStr = String(preservedEditMeta.id);
+                if (pendingTxTagsPayload && String(pendingTxTagsPayload.editId) === oldIdStr) {
+                    pendingTxTagsPayload.editId = String(resolvedTxId);
+                }
+                (financeData.transactions || []).forEach(other => {
+                    if (String(other.parentId) === oldIdStr) other.parentId = resolvedTxId;
+                    if (String(other.deletedWithParent) === oldIdStr) other.deletedWithParent = resolvedTxId;
+                    if (Array.isArray(other.allocatedItems)) {
+                        other.allocatedItems.forEach(al => {
+                            if (al.kind === 'cc_tx' && String(al.txId) === oldIdStr) al.txId = resolvedTxId;
+                        });
+                    }
+                    if (Array.isArray(other.linkedLibranzas)) {
+                        other.linkedLibranzas.forEach(lb => {
+                            if (String(lb.targetTxId) === oldIdStr) lb.targetTxId = resolvedTxId;
+                        });
+                    }
+                });
+                (financeData.pockets || []).forEach(pk => {
+                    if (Array.isArray(pk.yieldHistory)) {
+                        pk.yieldHistory.forEach(yh => {
+                            if (String(yh.txId) === oldIdStr) yh.txId = resolvedTxId;
+                        });
+                    }
+                });
+            }
+        }
         const txData = {
-            id: (preservedEditMeta && step === 0) ? preservedEditMeta.id : (txDate.getTime() + step + Math.floor(Math.random() * 500)),
+            id: resolvedTxId,
             monthId: (typeof getMonthId === 'function') ? getMonthId(txDate) : '0000-00', type, status: instStatus,
             account, category: savedCategory, subcategory: savedSubcategory,
             description: recCount > 1 ? `${description} (${step + 1}/${recCount})` : description,
@@ -5617,6 +5657,12 @@ form?.addEventListener('submit', (e) => {
         };
         if (preservedEditMeta && step === 0) {
             if (preservedEditMeta.isCleared) txData.isCleared = true;
+            if (preservedEditMeta.isGmfTax) txData.isGmfTax = true;
+            if (preservedEditMeta.isAccountMgmtFee) {
+                txData.isAccountMgmtFee = true;
+                txData.mgmtFeeAccountId = preservedEditMeta.mgmtFeeAccountId;
+                txData.mgmtFeeMonthId = preservedEditMeta.mgmtFeeMonthId || txData.monthId;
+            }
             if (preservedEditMeta.tags) txData.tags = preservedEditMeta.tags;
             if (preservedEditMeta.linkedLibranzas) txData.linkedLibranzas = preservedEditMeta.linkedLibranzas;
             if (preservedEditMeta.splitGroupId) txData.splitGroupId = preservedEditMeta.splitGroupId;

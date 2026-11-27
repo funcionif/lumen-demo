@@ -227,7 +227,7 @@ const renderDailySummary = () => {
     let sum30 = 0;
     const thirtyDaysAgo = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate() - 30).getTime();
     financeData.transactions.forEach(t => {
-        if (!t.isDeleted && !(t.isSharedTrip && t.paidBy === 'companion') && !t.isAdjustment && t.type !== 'transfer' && isTxClosed(t) && t.id >= thirtyDaysAgo && t.id <= Date.now()) {
+        if (!t.isDeleted && !t.isTripIsolated && !(t.isSharedTrip && t.paidBy === 'companion') && !t.isAdjustment && t.type !== 'transfer' && isTxClosed(t) && t.id >= thirtyDaysAgo && t.id <= Date.now()) {
             sum30 = round2(sum30 + (t.type === 'income' ? round2(t.amount) : -round2(t.amount)));
         }
     });
@@ -3005,13 +3005,13 @@ document.getElementById('add-account-form')?.addEventListener('submit', (e) => {
         showWhenZero: false,
         excludeFromLiquidity: excludeLiquidity
     });
-    if (makeDefault) setDefaultAccount(safeAccId, false);
+    if (makeDefault) setDefaultAccount(name, false);
 
     if (initial > 0) {
         const now = new Date();
         financeData.transactions.push({
             id: now.getTime(), monthId: getMonthId(now), type: 'income', status: 'closed',
-            account: safeAccId, description: 'Saldo Inicial', amount: initial,
+            account: name, description: 'Saldo Inicial', amount: initial,
             date: `${now.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}, ${now.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}`,
             isAdjustment: true
         });
@@ -18335,6 +18335,10 @@ if (rentaAnchorObsTarget) {
             toneBg = 'rgba(245, 158, 11, 0.14)'; toneColor = '#d97706';
             title = 'En Papelera este mes';
             desc = 'El cobro de este mes fue enviado a la Papelera y no se repetirá solo.';
+        } else if (st.status === 'before_config') {
+            toneBg = 'var(--hover-bg)'; toneColor = 'var(--text-muted)';
+            title = `Inicia el próximo mes • Día ${st.day}`;
+            desc = `Como el día ${st.day} ya pasó cuando la activaste, el cobro automático (${formatMoney(st.amount)}) arrancará el próximo ciclo. Si deseas registrarlo también en este mes, toca "Cobrar este mes".`;
         } else if (st.insufficientFunds) {
             toneBg = 'var(--negative-bg)'; toneColor = 'var(--negative)';
             title = 'Saldo insuficiente';
@@ -18511,18 +18515,20 @@ if (rentaAnchorObsTarget) {
             const st = evaluateAccountMgmtFeeCycle(acc, mId, null, currentDate);
             if (!st.enabled) return;
 
-            const nameBox = row.querySelector('.acc-list-name > div') || row.querySelector('.acc-list-name');
-            if (!nameBox) return;
+            const footerRow = row.lastElementChild;
+            if (!footerRow) return;
             const pill = document.createElement('small');
             pill.className = 'acc-mgmt-pill';
-            pill.style.cssText = 'display:block; font-size:10px; font-weight:700; margin-top:2px; color:' +
+            pill.style.cssText = 'margin-right:auto; font-size:10.5px; font-weight:700; color:' +
                 (st.status === 'waived' || st.status === 'charged' ? 'var(--positive)' : 'var(--text-muted)') + ';';
             pill.textContent = st.status === 'waived'
-                ? 'Manejo exonerado este mes'
+                ? 'Manejo exonerado'
                 : (st.status === 'charged'
                     ? `Manejo cobrado (${formatCompact(st.amount)})`
-                    : `Manejo: ${formatCompact(st.amount)} • Día ${st.day}`);
-            nameBox.appendChild(pill);
+                    : (st.status === 'before_config'
+                        ? `Manejo desde próx. mes (Día ${st.day})`
+                        : `Manejo: ${formatCompact(st.amount)} • Día ${st.day}`));
+            footerRow.prepend(pill);
         });
     };
 

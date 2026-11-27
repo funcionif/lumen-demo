@@ -66,6 +66,8 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
         return `<span class="privacy-sensitive">${esc(rawFormatted)}</span>`;
     };
     const isRefundTx = (t) => Boolean(t && ((typeof isTxRefundAdjustment === 'function' && isTxRefundAdjustment(t)) || t.isRefund));
+    const txMonthId = (t) => (typeof getTxMonthId === 'function' ? getTxMonthId(t) : (t?.monthId || ''));
+    const isCompanionTx = (t) => Boolean(t && t.isSharedTrip && t.paidBy === 'companion');
     const safeParseLocal = (key, fallback = null) => {
         try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback; } catch { return fallback; }
     };
@@ -350,7 +352,7 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
             data.customAccounts.filter(a => a.category === 'asset' && !a.id.startsWith('CxC_') && !a.excludeFromLiquidity).forEach(a => { liquid = r2(liquid + r2(balances[a.id] || 0)); });
             const safe = typeof computeSafeToSpendToday === 'function' ? computeSafeToSpendToday(monthId, snap) : null;
             const safeVal = safe ? safe.safeToSpend : liquid;
-            const pending = (data.transactions || []).filter(t => !t.isDeleted && t.monthId === monthId && t.status === 'pending');
+            const pending = (data.transactions || []).filter(t => !t.isDeleted && !isCompanionTx(t) && txMonthId(t) === monthId && t.status === 'pending');
             const totPend = r2(pending.reduce((s, t) => s + r2(t.budgetedAmount || t.amount), 0));
             const hm = typeof computeCalendarHeatmapData === 'function' ? computeCalendarHeatmapData(now, 'variable') : null;
 
@@ -405,7 +407,8 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
             }
 
             const rawRate = parseFloat(target.debtRate || target.rate || 0);
-            const isEffectiveAnnual = String(target.debtRateType || target.rateType || '').toUpperCase() === 'EA' || rawRate > 10;
+            const rawRateType = String(target.debtRateType || target.rateType || '').toLowerCase();
+            const isEffectiveAnnual = rawRateType === 'annual' || rawRateType === 'ea' || rawRate > 10;
             const monthlyRate = (rawRate > 0 && isEffectiveAnnual)
                 ? Math.pow(1 + rawRate / 100, 1 / 12) - 1
                 : (rawRate > 0 ? rawRate / 100 : 0.021);
@@ -447,12 +450,6 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
             if (!extAmt) return { title: 'Dime el monto de la compra', answer: 'Cuéntame cuánto vale lo que quieres comprar (ej. <i>"¿Cuánto pago si difiero 600.000 a 6 cuotas?"</i>) y hacemos las cuentas.' };
             const qMatch = raw.match(/(\d+)\s*cuotas?/i);
             const months = qMatch ? Math.max(1, parseInt(qMatch[1], 10)) : 6;
-            const monthlyRate = 0.022;
-            const quota = months === 1
-                ? extAmt
-                : r2((extAmt * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -months)));
-            const totalPaid = r2(quota * months);
-            const interestPaid = r2(totalPaid - extAmt);
 
             if (months === 1) {
                 return {
@@ -460,9 +457,46 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
                     answer: `<span style="color:var(--positive);">${SVG.ok}</span> Si lo pasas a <b>1 sola cuota</b> y pagas el total antes de la fecha límite, pagas exactamente <b>${fmt(extAmt)}</b> sin regalarle un peso en intereses al banco.`
                 };
             }
+
+            const allCards = (data.customAccounts || []).filter(a => a.category === 'credit_card');
+            const ignoreCardWords = new Set(['tc', 'de', 'la', 'el', 'banco', 'tarjeta', 'credito', 'cuotas', 'diferir']);
+            const namedCard = allCards.find(c =>
+                normalizeText(cleanRawLabel(c.name)).split(/\s+/).filter(w => w.length >= 2 && !ignoreCardWords.has(w)).some(w => q.includes(w))
+            );
+            const refCard = namedCard || allCards.find(c => c.isDefault) || allCards.find(c => parseFloat(c.rate) > 0) || allCards[0] || null;
+            const zeroIntMax = parseInt(refCard?.zeroInterestMax, 10) || 0;
+            const isCardZeroInt = Boolean(refCard && zeroIntMax > 0 && months <= zeroIntMax);
+
+            if (isCardZeroInt) {
+                const quotaZero = r2(extAmt / months);
+                return {
+                    title: `Simulación a ${months} cuotas (0% interés)`,
+                    answer: `<span style="color:var(--positive);">${SVG.ok}</span> Con tu tarjeta <b>${cleanLabel(refCard.name)}</b> (0% interés hasta ${zeroIntMax} cuotas), diferir <b>${fmt(extAmt)}</b> a <b>${months} cuotas</b> te queda en:<br><br>• <b>Cuota mensual:</b> <b>${fmt(quotaZero)}</b><br>• <b>Total a pagar:</b> ${fmt(extAmt)} (<b>$ 0</b> en intereses).`
+                };
+            }
+
+            const cardRate = parseFloat(refCard?.rate || 0);
+            const cardRateType = String(refCard?.rateType || 'monthly').toLowerCase() === 'annual' ? 'annual' : 'monthly';
+            const useCardRate = Boolean(refCard && cardRate > 0);
+            const amort = (typeof calculateAmortization === 'function')
+                ? calculateAmortization(extAmt, months, useCardRate ? cardRate : 2.2, useCardRate ? cardRateType : 'monthly')
+                : null;
+            const monthlyRate = amort
+                ? amort.monthlyRate
+                : (useCardRate
+                    ? (cardRateType === 'annual' ? Math.pow(1 + cardRate / 100, 1 / 12) - 1 : cardRate / 100)
+                    : 0.022);
+            const quota = amort ? amort.payment : r2((extAmt * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -months)));
+            const totalPaid = amort ? amort.totalWithInterest : r2(quota * months);
+            const interestPaid = amort ? amort.totalInterest : r2(totalPaid - extAmt);
+            const ratePctLabel = (monthlyRate * 100).toFixed(2).replace('.', ',');
+            const rateSourceLabel = useCardRate
+                ? `con la tasa de tu <b>${cleanLabel(refCard.name)}</b>: ${ratePctLabel}% mensual`
+                : `tasa promedio de referencia del 2,20% mensual`;
+
             return {
                 title: `Simulación a ${months} cuotas`,
-                answer: `<span style="color:var(--warning);">${SVG.card}</span> Si difieres <b>${fmt(extAmt)}</b> a <b>${months} cuotas</b> (calculado con una tasa promedio del 2,2% mensual):<br><br>• <b>Pagarías cada mes:</b> <b>${fmt(quota)}</b> aprox.<br>• <b>Total real al terminar:</b> ${fmt(totalPaid)}<br>• <b>Costo extra por financiar:</b> <strong style="color:var(--negative);">${fmt(interestPaid)}</strong> de más sobre el precio original.${renderTip('Si puedes pagarlo a 1 cuota o aprovechar una promoción sin interés, te quedas con esos intereses en tu bolsillo.')}`
+                answer: `<span style="color:var(--warning);">${SVG.card}</span> Si difieres <b>${fmt(extAmt)}</b> a <b>${months} cuotas</b> (${rateSourceLabel}):<br><br>• <b>Pagarías cada mes:</b> <b>${fmt(quota)}</b> aprox.<br>• <b>Total real al terminar:</b> ${fmt(totalPaid)}<br>• <b>Costo extra por financiar:</b> <strong style="color:var(--negative);">${fmt(interestPaid)}</strong> de más sobre el precio original.${renderTip('Si puedes pagarlo a 1 cuota o aprovechar una promoción sin interés, te quedas con esos intereses en tu bolsillo.')}`
             };
         }
 
@@ -473,7 +507,7 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
 
             let inc = 0, exp = 0, pend = 0;
             (data.transactions || []).forEach(t => {
-                if (t.isDeleted || t.isAdjustment || t.isTripIsolated || t.monthId !== monthId) return;
+                if (t.isDeleted || t.isAdjustment || t.isTripIsolated || isCompanionTx(t) || txMonthId(t) !== monthId) return;
                 if (t.status === 'pending') {
                     if (t.type === 'expense') pend = r2(pend + r2(t.budgetedAmount || t.amount));
                 } else if (isRefundTx(t)) {
@@ -563,6 +597,12 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
                 : null;
             if (pStatusChat && pStatusChat.hasSalary) {
                 netMonthly = pStatusChat.netAfterAdvances;
+                if (pStatusChat.isBiweekly) {
+                    if (pStatusChat.d1) d1 = pStatusChat.d1;
+                    if (pStatusChat.d2) d2 = pStatusChat.d2;
+                } else if (pStatusChat.d1) {
+                    payDayMonthly = pStatusChat.d1;
+                }
             } else if (salaryConf && typeof calculateLaborMetrics === 'function') {
                 const m = calculateLaborMetrics(salaryConf, now);
                 netMonthly = r2(m?.net || 0);
@@ -606,7 +646,7 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
                 pushItem(classifyToQ(day), sub.name, day, subAmt);
             });
 
-            (data.transactions || []).filter(t => !t.isDeleted && t.type === 'expense' && t.status === 'pending' && t.monthId === monthId).forEach(tx => {
+            (data.transactions || []).filter(t => !t.isDeleted && !isCompanionTx(t) && t.type === 'expense' && t.status === 'pending' && txMonthId(t) === monthId).forEach(tx => {
                 const day = new Date(tx.id).getDate();
                 pushItem(classifyToQ(day), tx.description || tx.category || 'Pago programado', day, r2(tx.budgetedAmount || tx.amount || 0));
             });
@@ -756,9 +796,16 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
             const totalReserve = r2(Math.max(0, liquid) + pocketSum);
 
             let monthExp = 0;
-            (data.transactions || []).forEach(t => {
-                if (!t.isDeleted && !t.isAdjustment && t.monthId === monthId && t.type === 'expense') monthExp = r2(monthExp + r2(t.amount));
-            });
+            if (typeof getMonthlyFlow === 'function') {
+                monthExp = getMonthlyFlow(monthId, false).exp;
+            } else {
+                (data.transactions || []).forEach(t => {
+                    if (t.isDeleted || t.isAdjustment || t.isTripIsolated || isCompanionTx(t) || t.status === 'pending' || txMonthId(t) !== monthId) return;
+                    if (isRefundTx(t)) monthExp = r2(monthExp - r2(t.amount));
+                    else if (t.type === 'expense') monthExp = r2(monthExp + r2(t.amount));
+                });
+                monthExp = Math.max(0, monthExp);
+            }
 
             if (monthExp <= 0) {
                 return { title: 'Tu Fondo de Emergencia', answer: `Hoy tienes <b>${fmt(totalReserve)}</b> disponibles entre tus cuentas positivas y bolsillos. Registra tus gastos del mes para calcular cuántos meses de tranquilidad te cubre ese respaldo.` };
@@ -829,7 +876,7 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
 
         if (q.includes('addi') || q.includes('sistecredito') || q.includes('bnpl') || q.includes('microcredito')) {
             const bnplAccs = data.customAccounts.filter(a => /addi|sistecredito|kueski|su\+|lulo/i.test(a.name));
-            const bnplTxs = (data.transactions || []).filter(t => !t.isDeleted && t.monthId === monthId && /addi|sistecredito/i.test(`${t.description} ${t.category} ${t.account}`));
+            const bnplTxs = (data.transactions || []).filter(t => !t.isDeleted && !isCompanionTx(t) && txMonthId(t) === monthId && /addi|sistecredito/i.test(`${t.description} ${t.category} ${t.account}`));
 
             let msg = '';
             if (bnplAccs.length > 0) {
@@ -850,12 +897,20 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
             const cards = data.customAccounts.filter(a => a.category === 'credit_card');
             if (cards.length === 0) return { title: 'Sin tarjetas', answer: 'No tienes tarjetas de crédito registradas.' };
 
-            const todayDay = now.getDate();
+            const cleanNow = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const y = cleanNow.getFullYear();
+            const m = cleanNow.getMonth();
+            const daysInCurr = new Date(y, m + 1, 0).getDate();
             const list = cards.map(c => {
-                const cut = Number(c.cutoffDay) || 1;
-                const pay = Number(c.paymentDay || c.payDay) || 15;
-                const daysToCut = cut >= todayDay ? cut - todayDay : (30 - todayDay + cut);
-                return `• <b>${cleanLabel(c.name)}</b>: Corta el día <b>${cut}</b> (en ~${daysToCut} días) y tu fecha límite de pago es el <b>${pay}</b>.`;
+                const cut = Math.max(1, Math.min(31, Number(c.cutoffDay) || 1));
+                const pay = Math.max(1, Math.min(31, Number(c.paymentDay || c.payDay) || 15));
+                const cutThisM = Math.min(cut, daysInCurr);
+                const nextCut = cleanNow.getDate() <= cutThisM
+                    ? new Date(y, m, cutThisM)
+                    : new Date(y, m + 1, Math.min(cut, new Date(y, m + 2, 0).getDate()));
+                const daysToCut = Math.max(0, Math.round((nextCut - cleanNow) / 86400000));
+                const whenTxt = daysToCut === 0 ? 'hoy' : `en ${daysToCut} día${daysToCut === 1 ? '' : 's'}`;
+                return `• <b>${cleanLabel(c.name)}</b>: Corta el día <b>${cut}</b> (${whenTxt}) y tu fecha límite de pago es el <b>${pay}</b>.`;
             }).join('<br>');
 
             return {
@@ -967,36 +1022,63 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
         // ==========================================
 
         if (q.includes('hormiga') || q.includes('gastos pequenos') || q.includes('gastos chiquitos')) {
-            const antThreshold = 25000;
-            const antTxs = (data.transactions || []).filter(t =>
-                !t.isDeleted && !t.isAdjustment && !t.isTripIsolated &&
-                t.monthId === monthId && t.type === 'expense' && t.status !== 'pending' &&
-                r2(t.amount) > 0 && r2(t.amount) <= antThreshold
-            );
+            const antThreshold = 35000;
+            let antCount = 0;
+            let totalAnt = 0;
+            let topItemLine = '';
 
-            if (antTxs.length === 0) {
-                return { title: 'Cero gasto hormiga', answer: `<span style="color:var(--positive);">${SVG.ok}</span> ¡Excelente control! No tienes compras pequeñas (de ${fmt(antThreshold)} o menos) registradas este mes.` };
+            if (typeof computeAntExpensesAndSubHikes === 'function') {
+                const antData = computeAntExpensesAndSubHikes(monthId, antThreshold);
+                antCount = antData.antCount;
+                totalAnt = antData.totalAntSpend;
+                if (antData.topAntItems && antData.topAntItems.length > 0) {
+                    const top = antData.topAntItems[0];
+                    topItemLine = `<br>• <b>Más frecuente:</b> <b>${esc(top.label)}</b> (${top.count}x • ${fmt(top.total)}).`;
+                }
+            } else {
+                const antTxs = (data.transactions || []).filter(t =>
+                    !t.isDeleted && !t.isAdjustment && !t.isTripIsolated && !isCompanionTx(t) &&
+                    txMonthId(t) === monthId && t.type === 'expense' && t.status !== 'pending' &&
+                    !(typeof isTxFixedExpense === 'function' && isTxFixedExpense(t)) &&
+                    r2(t.amount) > 0 && r2(t.amount) <= antThreshold
+                );
+                antCount = antTxs.length;
+                totalAnt = r2(antTxs.reduce((s, t) => s + r2(t.amount), 0));
             }
 
-            const totalAnt = r2(antTxs.reduce((s, t) => s + r2(t.amount), 0));
+            if (antCount === 0) {
+                return { title: 'Cero gasto hormiga', answer: `<span style="color:var(--positive);">${SVG.ok}</span> ¡Excelente control! No tienes gastos variables pequeños (de ${fmt(antThreshold)} o menos) registrados este mes.` };
+            }
+
             return {
                 title: 'Radar de Gasto Hormiga',
-                answer: `<span style="color:var(--warning);">${SVG.warn}</span> Los gastos hormiga son compras pequeñas del día a día (cafés, snacks, domicilios cortos) que parecen inofensivas pero suman bastante.<br><br>Este mes llevas <b>${antTxs.length} compras</b> de ${fmt(antThreshold)} o menos, que juntas ya suman <strong style="color:var(--negative);">${fmt(totalAnt)}</strong>.${renderTip(`Si recortas a la mitad esos antojos diarios, liberarías ${fmt(r2(totalAnt / 2))} al mes para tus metas.`)}`
+                answer: `<span style="color:var(--warning);">${SVG.warn}</span> Los gastos hormiga son compras variables pequeñas del día a día (sin contar gastos fijos) que parecen inofensivas pero suman bastante.<br><br>Este mes llevas <b>${antCount} compras</b> de ${fmt(antThreshold)} o menos, que juntas ya suman <strong style="color:var(--negative);">${fmt(totalAnt)}</strong> (${fmt(r2(totalAnt * 12))} proyectados al año).${topItemLine}${renderTip(`Si recortas a la mitad esos antojos diarios, liberarías ${fmt(r2(totalAnt / 2))} al mes para tus metas.`)}`
             };
         }
 
         if (q.includes('mes pasado') || q.includes('mes anterior') || q.includes('compare') || q.includes('comparado')) {
-            const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-            const prevMonthId = typeof getMonthId === 'function' ? getMonthId(prevDate) : prevDate.toISOString().slice(0, 7);
+            const [currY, currM] = monthId.split('-').map(Number);
+            const prevMonthId = `${currM === 1 ? currY - 1 : currY}-${String(currM === 1 ? 12 : currM - 1).padStart(2, '0')}`;
             const cutoffDay = now.getDate();
 
             let currSpent = 0, prevSpent = 0;
             (data.transactions || []).forEach(t => {
-                if (t.isDeleted || t.isAdjustment || t.isTripIsolated || t.type !== 'expense' || t.status === 'pending') return;
+                if (t.isDeleted || t.isAdjustment || t.isTripIsolated || isCompanionTx(t) || t.status === 'pending') return;
+                const txM = txMonthId(t);
+                if (txM !== monthId && txM !== prevMonthId) return;
                 const txDay = new Date(t.id).getDate();
-                if (t.monthId === monthId && txDay <= cutoffDay) currSpent = r2(currSpent + r2(t.amount));
-                if (t.monthId === prevMonthId && txDay <= cutoffDay) prevSpent = r2(prevSpent + r2(t.amount));
+                if (txDay > cutoffDay) return;
+                const amt = r2(t.amount);
+                if (t.type === 'expense') {
+                    if (txM === monthId) currSpent = r2(currSpent + amt);
+                    else prevSpent = r2(prevSpent + amt);
+                } else if (isRefundTx(t)) {
+                    if (txM === monthId) currSpent = r2(currSpent - amt);
+                    else prevSpent = r2(prevSpent - amt);
+                }
             });
+            currSpent = Math.max(0, currSpent);
+            prevSpent = Math.max(0, prevSpent);
 
             const diff = r2(currSpent - prevSpent);
             if (prevSpent === 0) {
@@ -1016,15 +1098,26 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
         if (q.includes('50 30 20') || q.includes('50/30/20') || q.includes('regla') || q.includes('distribucion de gastos')) {
             const fixedIds = new Set();
             (data.categories?.expense || []).forEach(c => { if (c.isFixed) fixedIds.add(cleanLabel(c.name)); });
+            const isFixedCatOrSub = (catName, subName) => {
+                if (typeof isTxFixedExpense === 'function') return isTxFixedExpense({ category: catName, subcategory: subName });
+                return fixedIds.has(cleanLabel(catName || ''));
+            };
 
-            let needs = 0, wants = 0, total = 0;
+            let needs = 0, wants = 0;
             (data.transactions || []).forEach(t => {
-                if (t.isDeleted || t.isAdjustment || t.isTripIsolated || t.monthId !== monthId || t.type !== 'expense' || t.status === 'pending') return;
+                if (t.isDeleted || t.isAdjustment || t.isTripIsolated || isCompanionTx(t) || txMonthId(t) !== monthId || t.status === 'pending') return;
                 const amt = r2(t.amount);
-                total = r2(total + amt);
-                if (fixedIds.has(cleanLabel(t.category || ''))) needs = r2(needs + amt);
-                else wants = r2(wants + amt);
+                if (t.type === 'expense') {
+                    if (isFixedCatOrSub(t.category, t.subcategory)) needs = r2(needs + amt);
+                    else wants = r2(wants + amt);
+                } else if (isRefundTx(t)) {
+                    if (t.refundCategory && isFixedCatOrSub(t.refundCategory, t.refundSubcategory)) needs = r2(needs - amt);
+                    else wants = r2(wants - amt);
+                }
             });
+            needs = Math.max(0, needs);
+            wants = Math.max(0, wants);
+            const total = r2(needs + wants);
 
             if (total === 0) return { title: 'Sin gastos aún', answer: 'Registra tus gastos del mes para mostrarte cómo se reparten según la regla 50/30/20.' };
 
@@ -1041,7 +1134,7 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
             const totals = [0, 0, 0, 0, 0, 0, 0];
 
             (data.transactions || []).forEach(t => {
-                if (t.isDeleted || t.isAdjustment || t.isTripIsolated || t.monthId !== monthId || t.type !== 'expense' || t.status === 'pending') return;
+                if (t.isDeleted || t.isAdjustment || t.isTripIsolated || isCompanionTx(t) || txMonthId(t) !== monthId || t.type !== 'expense' || t.status === 'pending') return;
                 const d = new Date(t.id).getDay();
                 totals[d] = r2(totals[d] + r2(t.amount));
             });
@@ -1059,7 +1152,7 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
         if (q.includes('comercios') || q.includes('donde compro') || q.includes('mas veces') || q.includes('repetitivos')) {
             const byDesc = {};
             (data.transactions || []).forEach(t => {
-                if (t.isDeleted || t.isAdjustment || t.monthId !== monthId || t.type !== 'expense' || t.status === 'pending') return;
+                if (t.isDeleted || t.isAdjustment || t.isTripIsolated || isCompanionTx(t) || txMonthId(t) !== monthId || t.type !== 'expense' || t.status === 'pending') return;
                 const key = cleanLabel(t.description || t.category || 'Varios');
                 if (!byDesc[key]) byDesc[key] = { count: 0, sum: 0 };
                 byDesc[key].count += 1;
@@ -1077,14 +1170,18 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
         }
 
         if (q.includes('tasa de ahorro') || q.includes('porcentaje de ahorro') || q.includes('cuanto ahorro al mes')) {
-            let inc = 0, exp = 0;
-            (data.transactions || []).forEach(t => {
-                if (t.isDeleted || t.isAdjustment || t.isTripIsolated || t.monthId !== monthId || t.status === 'pending') return;
-                if (isRefundTx(t)) { exp = r2(exp - r2(t.amount)); return; }
-                if (t.type === 'income') inc = r2(inc + r2(t.amount));
-                if (t.type === 'expense') exp = r2(exp + r2(t.amount));
-            });
-            exp = Math.max(0, exp);
+            const flow = typeof getMonthlyFlow === 'function' ? getMonthlyFlow(monthId, false) : null;
+            let inc = flow ? flow.inc : 0;
+            let exp = flow ? flow.exp : 0;
+            if (!flow) {
+                (data.transactions || []).forEach(t => {
+                    if (t.isDeleted || t.isAdjustment || t.isTripIsolated || isCompanionTx(t) || txMonthId(t) !== monthId || t.status === 'pending') return;
+                    if (isRefundTx(t)) { exp = r2(exp - r2(t.amount)); return; }
+                    if (t.type === 'income') inc = r2(inc + r2(t.amount));
+                    if (t.type === 'expense') exp = r2(exp + r2(t.amount));
+                });
+                exp = Math.max(0, exp);
+            }
             if (inc <= 0) return { title: 'Sin ingresos registrados', answer: 'Registra tus ingresos de este mes para calcular qué porcentaje logras conservar.' };
             const saved = r2(inc - exp);
             const rate = Math.round((saved / inc) * 100);
@@ -1101,15 +1198,19 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
         if (q.includes('patrimonio') || q.includes('balance') || q.includes('riqueza') || q.includes('activos y pasivos')) {
             const cdtVal = typeof getCDTPortfolioInsights === 'function' ? r2(getCDTPortfolioInsights(now).valorActualTotal || 0) : 0;
             const visibleFA = snap.visibleFixedAssetsTotal !== undefined ? snap.visibleFixedAssetsTotal : (snap.fixedAssetsTotal || 0);
-            const assets = r2((snap.assetsTotal || 0) + (snap.cxcTotal || 0) + visibleFA + (snap.pocketsTotal || 0) + cdtVal);
+            const assetsBalance = r2((snap.assetsTotal || 0) + (snap.cxcTotal || 0) + visibleFA + (snap.pocketsTotal || 0));
             const liab = r2(snap.liabilitiesTotal || 0);
-            const nw = r2(assets - liab);
-            const explainNote = nw >= 0
+            const nwBalance = snap.netWorth !== undefined ? r2(snap.netWorth) : r2(assetsBalance - liab);
+            const nwWithCdt = r2(nwBalance + cdtVal);
+            const cdtLine = cdtVal > 0
+                ? `<br>• <b>Portafolio CDT / CDAT (aparte del balance):</b> <span style="color:var(--positive);">+${fmt(cdtVal)}</span> → Total con CDTs: <b>${fmt(nwWithCdt)}</b>`
+                : '';
+            const explainNote = nwWithCdt >= 0
                 ? 'Como es positivo, lo que posees supera lo que debes.'
                 : 'Que hoy sea negativo es normal si tienes créditos o tarjetas grandes; cada cuota que pagas lo va subiendo.';
             return {
                 title: 'Tu Hoja de Balance (Patrimonio Neto)',
-                answer: `<span style="color:var(--accent);">${SVG.chart}</span> Si hoy vendieras todo lo que tienes y pagaras todas tus deudas, el resultado sería tu Patrimonio Neto: <b>${fmt(nw)}</b>.<br><br>• <b>Activos (cuentas, bolsillos, bienes${cdtVal > 0 ? ' y CDTs' : ''}):</b> <span style="color:var(--positive);">${fmt(assets)}</span><br>• <b>Pasivos (tarjetas y créditos):</b> <span style="color:var(--negative);">${fmt(liab)}</span><br><br>${explainNote}`
+                answer: `<span style="color:var(--accent);">${SVG.chart}</span> Si hoy vendieras todo lo que tienes y pagaras todas tus deudas, tu Patrimonio Neto en Hoja de Balance es <b>${fmt(nwBalance)}</b>.<br><br>• <b>Activos en Balance (cuentas, bolsillos y bienes):</b> <span style="color:var(--positive);">${fmt(assetsBalance)}</span><br>• <b>Pasivos (tarjetas y créditos):</b> <span style="color:var(--negative);">${fmt(liab)}</span>${cdtLine}<br><br>${explainNote}`
             };
         }
 
@@ -1157,12 +1258,11 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
                 netIncomeRef = r2(calculateLaborMetrics(sal, now).net || 0);
             }
             if (netIncomeRef <= 0) {
-                const currMid = typeof getMonthId === 'function' ? getMonthId(new Date()) : '';
-                (data.transactions || []).forEach(t => {
-                    if (!t.isDeleted && t.type === 'income' && !t.isAdjustment && t.monthId === currMid) {
-                        netIncomeRef = r2(netIncomeRef + r2(t.amount));
-                    }
-                });
+                netIncomeRef = typeof getMonthlyFlow === 'function'
+                    ? getMonthlyFlow(monthId, false).inc
+                    : r2((data.transactions || [])
+                        .filter(t => !t.isDeleted && !isCompanionTx(t) && !isRefundTx(t) && t.type === 'income' && !t.isAdjustment && t.status !== 'pending' && txMonthId(t) === monthId)
+                        .reduce((s, t) => s + r2(t.amount), 0));
             }
 
             const ratioLine = netIncomeRef > 0
@@ -1184,10 +1284,11 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
         }
 
         if (q.includes('falta pagar') || q.includes('pendientes') || q.includes('por pagar')) {
-            const pend = (data.transactions || []).filter(t => !t.isDeleted && t.monthId === monthId && t.status === 'pending');
+            const pend = (data.transactions || []).filter(t => !t.isDeleted && !isCompanionTx(t) && txMonthId(t) === monthId && t.status === 'pending');
             if (pend.length === 0) return { title: 'Todo al día', answer: `<span style="color:var(--positive);">${SVG.ok}</span> No tienes recibos ni pagos pendientes registrados este mes.` };
-            let tp = 0;
-            const list = pend.slice(0, 4).map(t => { const v = r2(t.budgetedAmount || t.amount); tp = r2(tp + v); return `• <b>${cleanLabel(t.description || t.category)}</b>: ${fmt(v)}`; }).join('<br>');
+            const tp = r2(pend.reduce((s, t) => s + r2(t.budgetedAmount || t.amount), 0));
+            const list = pend.slice(0, 4).map(t => `• <b>${cleanLabel(t.description || t.category)}</b>: ${fmt(r2(t.budgetedAmount || t.amount))}`).join('<br>') +
+                (pend.length > 4 ? `<br>• <i>… y ${pend.length - 4} compromiso(s) más</i>` : '');
             return {
                 title: 'Radar de Pagos Pendientes',
                 answer: `<span style="color:var(--accent);">${SVG.info}</span> Aún te faltan <b>${pend.length} compromiso(s)</b> por pagar este mes, que suman <strong style="color:var(--negative);">${fmt(tp)}</strong>:<br><br>${list}${renderTip('Ten presente este valor antes de hacer compras grandes: es dinero que ya tiene dueño.')}`
@@ -1195,11 +1296,27 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
         }
 
         if (q.includes('en que se me fue') || q.includes('fugas') || q.includes('mas gaste') || q.includes('gaste mas')) {
-            const txs = (data.transactions || []).filter(t => t.monthId === monthId && t.type === 'expense' && !t.isDeleted && !t.isAdjustment && !t.isTripIsolated && t.status !== 'pending');
-            if (txs.length === 0) return { title: 'Mes en ceros', answer: 'Aún no tienes gastos reales registrados este mes.' };
-            const byCat = {}; let tot = 0;
-            txs.forEach(t => { const c = cleanLabel(t.category || 'Otros'); const a = r2(t.amount); byCat[c] = r2((byCat[c] || 0) + a); tot = r2(tot + a); });
-            const sorted = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+            const byCat = {};
+            let totalRefunds = 0;
+            let rawTot = 0;
+            (data.transactions || []).forEach(t => {
+                if (t.isDeleted || t.isAdjustment || t.isTripIsolated || isCompanionTx(t) || t.status === 'pending' || txMonthId(t) !== monthId) return;
+                const a = r2(t.amount);
+                if (t.type === 'expense') {
+                    const c = cleanLabel(t.category || 'Otros');
+                    byCat[c] = r2((byCat[c] || 0) + a);
+                    rawTot = r2(rawTot + a);
+                } else if (isRefundTx(t)) {
+                    totalRefunds = r2(totalRefunds + a);
+                    if (t.refundCategory) {
+                        const rc = cleanLabel(t.refundCategory);
+                        byCat[rc] = Math.max(0, r2((byCat[rc] || 0) - a));
+                    }
+                }
+            });
+            const tot = Math.max(0, r2(rawTot - totalRefunds));
+            const sorted = Object.entries(byCat).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+            if (tot <= 0 || sorted.length === 0) return { title: 'Mes en ceros', answer: 'Aún no tienes gastos reales registrados este mes.' };
             const top = sorted[0];
             const second = sorted[1];
             const secondLine = second ? `<br>• <b>Segundo lugar:</b> <b>${second[0]}</b> con ${fmt(second[1])} (${Math.round((second[1] / tot) * 100)}%).` : '';
@@ -1210,12 +1327,13 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
         }
 
         if (q.includes('como voy') || q.includes('velocidad') || q.includes('presupuesto') || q.includes('cuanto me queda')) {
-            const mIdx = now.getMonth();
-            const yr = now.getFullYear();
-            const daysInMonth = new Date(yr, mIdx + 1, 0).getDate();
+            const [yrStr, mStr] = monthId.split('-');
+            const yr = parseInt(yrStr, 10) || now.getFullYear();
+            const mIdx = Math.max(0, Math.min(11, (parseInt(mStr, 10) || (now.getMonth() + 1)) - 1));
+            const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
             const monthElapsedPct = Math.round((now.getDate() / daysInMonth) * 100);
 
-            let totalLim = 0, totalSpent = 0;
+            let totalLim = 0, totalSpent = 0, totalRefunds = 0;
             const categoryLimits = {};
             const categorySpent = {};
 
@@ -1228,13 +1346,21 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
             });
 
             (data.transactions || []).forEach(t => {
-                if (!t.isDeleted && !t.isTripIsolated && t.monthId === monthId && t.type === 'expense' && !t.isAdjustment && t.status !== 'pending') {
-                    const amt = r2(t.amount);
+                if (t.isDeleted || t.isTripIsolated || isCompanionTx(t) || txMonthId(t) !== monthId || t.isAdjustment || t.status === 'pending') return;
+                const amt = r2(t.amount);
+                if (t.type === 'expense') {
                     totalSpent = r2(totalSpent + amt);
                     const catName = cleanLabel(t.category || 'Otros');
                     categorySpent[catName] = r2((categorySpent[catName] || 0) + amt);
+                } else if (isRefundTx(t)) {
+                    totalRefunds = r2(totalRefunds + amt);
+                    if (t.refundCategory) {
+                        const refCat = cleanLabel(t.refundCategory);
+                        categorySpent[refCat] = Math.max(0, r2((categorySpent[refCat] || 0) - amt));
+                    }
                 }
             });
+            totalSpent = Math.max(0, r2(totalSpent - totalRefunds));
 
             if (totalLim <= 0) {
                 return {
@@ -1320,13 +1446,18 @@ Sé cálido, directo y muy claro. No uses jerga técnica compleja a menos que se
         }
 
         if (q.includes('ingresos este mes') || q.includes('cuanto ha entrado') || q.includes('ganancias')) {
-            let inc = 0, exp = 0;
-            (data.transactions || []).forEach(t => {
-                if (t.isDeleted || t.monthId !== monthId || t.isAdjustment || t.status === 'pending') return;
-                if (isRefundTx(t)) { exp = Math.max(0, r2(exp - r2(t.amount))); return; }
-                if (t.type === 'income') inc = r2(inc + r2(t.amount));
-                if (t.type === 'expense') exp = r2(exp + r2(t.amount));
-            });
+            const flow = typeof getMonthlyFlow === 'function' ? getMonthlyFlow(monthId, false) : null;
+            let inc = flow ? flow.inc : 0;
+            let exp = flow ? flow.exp : 0;
+            if (!flow) {
+                (data.transactions || []).forEach(t => {
+                    if (t.isDeleted || isCompanionTx(t) || t.isTripIsolated || txMonthId(t) !== monthId || t.isAdjustment || t.status === 'pending') return;
+                    if (isRefundTx(t)) { exp = r2(exp - r2(t.amount)); return; }
+                    if (t.type === 'income') inc = r2(inc + r2(t.amount));
+                    if (t.type === 'expense') exp = r2(exp + r2(t.amount));
+                });
+                exp = Math.max(0, exp);
+            }
             const remainingInc = r2(inc - exp);
             return {
                 title: 'Ingresos del Mes',
