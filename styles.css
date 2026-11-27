@@ -406,7 +406,7 @@ body.app-bg-shield::before {
     position: fixed;
     inset: 0;
     z-index: 99999;
-    background: #0B0F19 url('./icon.png') no-repeat center center / 76px 76px;
+    background: var(--bg-base) url('./icon.png') no-repeat center center / 76px 76px;
     pointer-events: all;
 }
 body.no-animations #lumen-splash-path {

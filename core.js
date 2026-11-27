@@ -5622,14 +5622,41 @@ const generateICSBlob = (title, description, dateObj) => {
     if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(uidBytes);
     const uidHex = Array.from(uidBytes).map(b => b.toString(16).padStart(2, '0')).join('');
 
-    const dtstart = formatDateStr(dateObj);
-    const endObj = new Date(dateObj.getTime() + 30 * 60000);
+    const nPrefs = financeData?.notificationPrefs || {};
+    const [prefH, prefM] = String(nPrefs.fireTime || '08:00').split(':').map(Number);
+    const tunedDate = new Date(
+        dateObj.getFullYear(),
+        dateObj.getMonth(),
+        dateObj.getDate(),
+        Number.isFinite(prefH) ? prefH : dateObj.getHours(),
+        Number.isFinite(prefM) ? prefM : dateObj.getMinutes(),
+        0
+    );
+
+    const dtstart = formatDateStr(tunedDate);
+    const endObj = new Date(tunedDate.getTime() + 30 * 60000);
     const dtend = formatDateStr(endObj);
+
+    const offsets = Array.isArray(nPrefs.reminderOffsets) && nPrefs.reminderOffsets.length > 0
+        ? nPrefs.reminderOffsets.map(Number).filter(n => !Number.isNaN(n) && n >= 0)
+        : [nPrefs.daysBefore || 5, 1, 0];
+
+    const alarmBlocks = offsets.flatMap(days => {
+        const trigger = days === 0 ? '-PT0M' : `-P${days}D`;
+        const prefix = days === 0 ? 'Hoy vence' : (days === 1 ? 'Mañana vence' : `En ${days} días`);
+        return [
+            'BEGIN:VALARM',
+            `TRIGGER:${trigger}`,
+            'ACTION:DISPLAY',
+            `DESCRIPTION:${prefix}: ${safeTitle}`,
+            'END:VALARM'
+        ];
+    });
 
     const icsData = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        'PRODID:-//Lumen//v2.2.3//ES',
+        'PRODID:-//Lumen//v2.2.4//ES',
         'BEGIN:VEVENT',
         `UID:${Date.now()}-${uidHex}@lumen.local`,
         `DTSTAMP:${formatDateStr(new Date())}`,
@@ -5637,11 +5664,7 @@ const generateICSBlob = (title, description, dateObj) => {
         `DTEND:${dtend}`,
         `SUMMARY:${safeTitle}`,
         `DESCRIPTION:${safeDesc}`,
-        'BEGIN:VALARM',
-        'TRIGGER:-PT15M',
-        'ACTION:DISPLAY',
-        `DESCRIPTION:Recordatorio: ${safeTitle}`,
-        'END:VALARM',
+        ...alarmBlocks,
         'END:VEVENT',
         'END:VCALENDAR'
     ].join('\r\n');

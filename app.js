@@ -1239,10 +1239,10 @@ const initAuthUI = async (forceLock = false) => {
     if (splashEl && !splashEl.dataset.dismissed) {
         splashEl.dataset.dismissed = '1';
         const skipAnim = forceLock || document.body.classList.contains('no-animations');
-        const waitMs = skipAnim ? 120 : 1050;
+        const waitMs = skipAnim ? 120 : 1850;
         await new Promise((resolve) => setTimeout(resolve, waitMs));
         splashEl.classList.add('splash-hide');
-        setTimeout(() => splashEl.remove(), 380);
+        setTimeout(() => splashEl.remove(), 480);
     }
 
     const bioAvailable = await isBiometricHardwareAvailable();

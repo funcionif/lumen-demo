@@ -486,6 +486,16 @@
     const rawSet = Storage.prototype.setItem.bind(rawStorage);
     const rawRemove = Storage.prototype.removeItem.bind(rawStorage);
 
+    // Sincronización instantánea (0 ms) del tema Claro / Oscuro antes de pintar el Splash
+    try {
+        const bootColorMode = rawGet('myFinancesColorMode');
+        if (bootColorMode === 'light' || bootColorMode === 'dark' || bootColorMode === 'black') {
+            document.documentElement.setAttribute('data-color-mode', bootColorMode);
+        } else {
+            document.documentElement.removeAttribute('data-color-mode');
+        }
+    } catch (_) {}
+
     const LOCKOUT_KEY = 'lumen_auth_guard_v1';
     const MAX_FREE_ATTEMPTS = 4;
     const monoNow = () => (typeof performance !== 'undefined' && typeof performance.now === 'function')
