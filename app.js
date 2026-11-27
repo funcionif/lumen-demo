@@ -1226,12 +1226,23 @@ const initAuthUI = async (forceLock = false) => {
         }
 
         const pinInput = document.getElementById('login-pin');
-        if (pinInput) { pinInput.value = ''; setTimeout(() => pinInput.focus(), 120); }
+        if (pinInput) pinInput.value = '';
     } else {
         document.body.classList.remove('app-locked');
         syncUserUI();
         overlay.classList.add('hidden');
         if (typeof checkWhatsNewBanner === 'function') checkWhatsNewBanner();
+    }
+
+    // Coordinar cierre suave del Splash de apertura antes de invocar teclado o Face ID / Huella
+    const splashEl = document.getElementById('lumen-splash-screen');
+    if (splashEl && !splashEl.dataset.dismissed) {
+        splashEl.dataset.dismissed = '1';
+        const skipAnim = forceLock || document.body.classList.contains('no-animations');
+        const waitMs = skipAnim ? 120 : 1050;
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        splashEl.classList.add('splash-hide');
+        setTimeout(() => splashEl.remove(), 380);
     }
 
     const bioAvailable = await isBiometricHardwareAvailable();
@@ -1245,8 +1256,13 @@ const initAuthUI = async (forceLock = false) => {
         const pCheck = document.getElementById('profile-use-biometric');
         if (wCheck) wCheck.disabled = true;
         if (pCheck) pCheck.disabled = true;
+        if (authData && (authData.pinEnabled || forceLock)) {
+            document.getElementById('login-pin')?.focus();
+        }
     } else if (authData && (authData.pinEnabled || forceLock) && authData.biometricEnabled) {
         triggerBiometricUnlock();
+    } else if (authData && (authData.pinEnabled || forceLock)) {
+        document.getElementById('login-pin')?.focus();
     }
 };
 
@@ -2477,9 +2493,16 @@ document.addEventListener('click', async (e) => {
             document.getElementById('profile-main-view')?.classList.add('hidden'); 
             document.getElementById('profile-notifications-view')?.classList.remove('hidden'); 
             const prefs = getNotificationPrefs(); 
+            if (document.getElementById('notif-push-enabled')) document.getElementById('notif-push-enabled').checked = prefs.pushEnabled !== false;
+            if (document.getElementById('pref-tx-sound-enabled')) document.getElementById('pref-tx-sound-enabled').checked = financeData.preferences?.txSoundEnabled !== false;
+            if (document.getElementById('notif-fire-time')) document.getElementById('notif-fire-time').value = prefs.fireTime || '08:00';
             document.getElementById('notif-days-before').value = prefs.daysBefore; 
             document.getElementById('notif-budget-pct').value = prefs.budgetPct; 
             document.getElementById('notif-pending-enabled').checked = !!prefs.pendingEnabled; 
+            const activeDays = new Set(Array.isArray(prefs.reminderOffsets) ? prefs.reminderOffsets.map(Number) : [prefs.daysBefore || 5, 1, 0]);
+            document.querySelectorAll('#notif-multi-days-chips [data-nday]').forEach(chip => {
+                chip.classList.toggle('active', activeDays.has(Number(chip.getAttribute('data-nday'))));
+            });
             if(document.getElementById('pref-show-projections')) document.getElementById('pref-show-projections').checked = financeData.preferences?.showProjections !== false;
             if(document.getElementById('pref-remember-account')) document.getElementById('pref-remember-account').checked = financeData.preferences?.rememberAccount !== false;
             if(document.getElementById('pref-remember-category')) document.getElementById('pref-remember-category').checked = financeData.preferences?.rememberCategory !== false;
@@ -2524,10 +2547,99 @@ document.addEventListener('click', (e) => {
     }
 }, true);
 
-// --- 6. ALERTAS INTELIGENTES, .ICS iOS Y AVISO PREVENTIVO DE RESPALDO ---
 const getNotificationPrefs = () => {
-    return financeData.notificationPrefs || { daysBefore: 5, budgetPct: 85, pendingEnabled: true };
+    const base = { pushEnabled: true, fireTime: '08:00', reminderOffsets: [5, 1, 0], daysBefore: 5, budgetPct: 85, pendingEnabled: true };
+    return { ...base, ...(financeData.notificationPrefs || {}) };
 };
+
+// --- MOTOR ACÚSTICO SINTETIZADO LUMEN (UNIVERSAL iOS PWA / WEB / ANDROID, 0 KB, 100% OFFLINE) ---
+let _lumenAudioCtx = null;
+
+const ensureUnlockedAudioCtx = () => {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!_lumenAudioCtx || _lumenAudioCtx.state === 'closed') {
+        _lumenAudioCtx = new AudioCtx();
+    }
+    // Cubre tanto 'suspended' (Android/Web) como 'interrupted' (exclusivo de iOS PWA al minimizar)
+    if (_lumenAudioCtx.state !== 'running') {
+        return _lumenAudioCtx.resume().then(() => _lumenAudioCtx).catch(() => _lumenAudioCtx);
+    }
+    return Promise.resolve(_lumenAudioCtx);
+};
+
+// Despertar silencioso en el primer toque directo (evita que Safari recorte el primer sonido)
+const _unlockIosWebAudioOnce = () => {
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        if (!_lumenAudioCtx) _lumenAudioCtx = new AudioCtx();
+        const buf = _lumenAudioCtx.createBuffer(1, 1, 22050);
+        const src = _lumenAudioCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(_lumenAudioCtx.destination);
+        src.start(0);
+        if (_lumenAudioCtx.state !== 'running') {
+            _lumenAudioCtx.resume().catch(() => {});
+        }
+    } catch (_) {}
+};
+['touchend', 'pointerdown'].forEach(evtName => {
+    document.addEventListener(evtName, _unlockIosWebAudioOnce, { once: true, passive: true });
+});
+
+window.playLumenTxSound = (txType = 'expense', forcePlay = false) => {
+    try {
+        if (!forcePlay && financeData?.preferences?.txSoundEnabled === false) return;
+        const p = ensureUnlockedAudioCtx();
+        if (!p) return;
+        p.then((ctx) => {
+            if (!ctx || ctx.state !== 'running') return;
+            const now = ctx.currentTime + 0.005;
+            const playTone = (freq, startOffset, duration, wave = 'sine', peakGain = 0.12) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = wave;
+                osc.frequency.setValueAtTime(freq, now + startOffset);
+                gain.gain.setValueAtTime(0.0001, now + startOffset);
+                gain.gain.exponentialRampToValueAtTime(peakGain, now + startOffset + 0.014);
+                gain.gain.exponentialRampToValueAtTime(0.0001, now + startOffset + duration);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(now + startOffset);
+                osc.stop(now + startOffset + duration + 0.015);
+            };
+
+            if (txType === 'income') {
+                playTone(587.33, 0.00, 0.13, 'triangle', 0.13); // Re5
+                playTone(880.00, 0.075, 0.20, 'sine', 0.14);    // La5 (ascendente luminoso)
+            } else if (txType === 'transfer') {
+                playTone(523.25, 0.00, 0.11, 'sine', 0.11);     // Do5
+                playTone(659.25, 0.065, 0.15, 'triangle', 0.11);// Mi5 (paso fluido)
+            } else {
+                playTone(523.25, 0.00, 0.085, 'triangle', 0.11);// Do5
+                playTone(392.00, 0.055, 0.12, 'sine', 0.10);    // Sol4 (pulso sobrio)
+            }
+        });
+    } catch (_) {}
+};
+
+document.addEventListener('click', (e) => {
+    const chip = e.target.closest('#notif-multi-days-chips [data-nday]');
+    if (chip) {
+        chip.classList.toggle('active');
+        return;
+    }
+    const testBtn = e.target.closest('#btn-test-tx-sound');
+    if (testBtn) {
+        const types = ['income', 'expense', 'transfer'];
+        const labels = ['Ingreso ♪', 'Gasto ♪', 'Transf. ♪'];
+        const idx = Number(testBtn.dataset.demoIdx || 0) % 3;
+        testBtn.dataset.demoIdx = String(idx + 1);
+        testBtn.textContent = labels[idx];
+        window.playLumenTxSound(types[idx], true);
+    }
+});
 
 const downloadIcsEvent = (title, description, dateObj) => {
     const blob = generateICSBlob(title, description, dateObj);
@@ -2593,13 +2705,23 @@ const renderSmartAlerts = (monthId, snap) => {
         }
     }
 
+    const resolveMaxWindowForAcc = (acc, fallbackDays) => {
+        if (prefs.pushEnabled === false) return -999;
+        if (!acc?.notifRule || acc.notifRule === 'default') return fallbackDays;
+        if (acc.notifRule === 'off') return -999;
+        const parsed = String(acc.notifRule).split(',').map(Number).filter(n => !Number.isNaN(n));
+        return parsed.length > 0 ? Math.max(...parsed) : fallbackDays;
+    };
+
     financeData.customAccounts.filter(a => a.category === 'credit_card').forEach(c => {
+        const cardWindow = resolveMaxWindowForAcc(c, prefs.daysBefore);
+        if (cardWindow < 0) return;
         const bal = round2(snap.bals[c.id] || 0);
         const nextDue = typeof getNextUnpaidLiabilityCycle === 'function'
             ? getNextUnpaidLiabilityCycle(c, bal, currentDate, 3)
             : null;
-        if (nextDue && nextDue.diffDays <= prefs.daysBefore) {
-            const payDate = new Date(nextDue.dueDate.getFullYear(), nextDue.dueDate.getMonth(), nextDue.dueDate.getDate(), 8, 30, 0);
+        if (nextDue && nextDue.diffDays <= cardWindow) {
+            const payDate = new Date(nextDue.dueDate.getFullYear(), nextDue.dueDate.getMonth(), nextDue.dueDate.getDate(), 8, 0, 0);
             const daysLine = nextDue.diffDays < 0
                 ? `Venció hace ${Math.abs(nextDue.diffDays)} día(s)`
                 : (nextDue.diffDays === 0 ? `Hoy (día ${c.paymentDay})` : `En ${nextDue.diffDays} día(s) (día ${c.paymentDay})`);
@@ -2622,7 +2744,9 @@ const renderSmartAlerts = (monthId, snap) => {
 
     financeData.customAccounts.filter(a => a.category === 'debt' && !a.payrollDeduction && a.paymentDay).forEach(debt => {
         const bal = round2(snap.bals[debt.id] || 0);
-        const maxWindow = debt.debtType === 'education' ? 7 : prefs.daysBefore;
+        const baseWin = debt.debtType === 'education' ? Math.max(7, prefs.daysBefore) : prefs.daysBefore;
+        const maxWindow = resolveMaxWindowForAcc(debt, baseWin);
+        if (maxWindow < 0) return;
         const nextDue = typeof getNextUnpaidLiabilityCycle === 'function'
             ? getNextUnpaidLiabilityCycle(debt, bal, currentDate, 5)
             : null;
@@ -5970,6 +6094,7 @@ form?.addEventListener('submit', (e) => {
 
     const prevPocketId = window.returnToPocketHistoryId;
     localStorage.setItem('myFinances', JSON.stringify(financeData));
+    if (typeof window.playLumenTxSound === 'function') window.playLumenTxSound(type);
     if (typeof viewDate !== 'undefined') viewDate = new Date(baseDateObj.getFullYear(), baseDateObj.getMonth(), 1);
     
     if (typeof forceCloseAllModals === 'function') forceCloseAllModals(); 
@@ -10762,49 +10887,69 @@ window.syncNativeLocalNotifications = async () => {
     if (!LocalNotifications) return;
 
     try {
-        // 1. Verificar o pedir permiso al usuario (Android 13+)
+        const prefs = getNotificationPrefs();
+
+        // Limpiar notificaciones previas siempre; si el usuario apagó el switch maestro, salir en silencio
+        const pendingList = await LocalNotifications.getPending().catch(() => ({ notifications: [] }));
+        if (pendingList?.notifications?.length > 0) {
+            await LocalNotifications.cancel({ notifications: pendingList.notifications });
+        }
+        if (prefs.pushEnabled === false) return;
+
         let perm = await LocalNotifications.checkPermissions();
         if (perm.display === 'prompt') {
             perm = await LocalNotifications.requestPermissions();
         }
         if (perm.display !== 'granted') return;
 
-        // 2. Crear canal de alta prioridad (banner flotante + pantalla bloqueada)
         await LocalNotifications.createChannel({
-            id: 'lumen_alerts_v1',
+            id: 'lumen_alerts_v2',
             name: 'Recordatorios Financieros',
-            description: 'Alertas de tarjetas, pagos recurrentes y CDTs',
+            description: 'Alertas de tarjetas, créditos, servicios y CDTs',
             importance: 4,
-            visibility: 1
+            visibility: 1,
+            vibration: true,
+            sound: 'lumen_notify.wav'
         }).catch(() => {});
 
-        // 3. Limpiar notificaciones programadas previas para no duplicar
-        const pendingList = await LocalNotifications.getPending();
-        if (pendingList?.notifications?.length > 0) {
-            await LocalNotifications.cancel({ notifications: pendingList.notifications });
-        }
+        const [rawH, rawM] = String(prefs.fireTime || '08:00').split(':').map(Number);
+        const fireHour = Number.isFinite(rawH) ? Math.max(0, Math.min(23, rawH)) : 8;
+        const fireMin = Number.isFinite(rawM) ? Math.max(0, Math.min(59, rawM)) : 0;
+        const globalOffsets = Array.isArray(prefs.reminderOffsets) && prefs.reminderOffsets.length > 0
+            ? prefs.reminderOffsets.map(Number).filter(n => n >= 0 && n <= 30)
+            : [prefs.daysBefore || 5, 1, 0];
 
-        const prefs = getNotificationPrefs();
+        const resolveItemOffsets = (customRule) => {
+            if (!customRule || customRule === 'default') return globalOffsets;
+            if (customRule === 'off') return [];
+            return String(customRule).split(',').map(Number).filter(n => !Number.isNaN(n) && n >= 0);
+        };
+
         const hideAmounts = localStorage.getItem('myFinancesPrivacyMode') === 'true';
         const now = new Date();
         const currSnap = computeBalancesUpTo(getMonthId(now));
         const toSchedule = [];
         let notifId = 1001;
 
-        const addReminder = (title, body, targetDate) => {
-            const fireDate = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 8, 30, 0);
-            if (fireDate <= now) return; // Solo programar fechas futuras
-            toSchedule.push({
-                id: notifId++,
-                title,
-                body,
-                channelId: 'lumen_alerts_v1',
-                schedule: { at: fireDate, allowWhileIdle: true },
-                smallIcon: 'ic_launcher'
+        const scheduleSeriesForDueDate = (title, baseBody, dueDateObj, offsetsArr) => {
+            offsetsArr.forEach(daysBefore => {
+                const fireDate = new Date(dueDateObj.getFullYear(), dueDateObj.getMonth(), dueDateObj.getDate() - daysBefore, fireHour, fireMin, 0);
+                if (fireDate <= now || toSchedule.length >= 60) return;
+                const whenPrefix = daysBefore === 0
+                    ? '¡Vence hoy!'
+                    : (daysBefore === 1 ? 'Vence mañana.' : `Faltan ${daysBefore} días.`);
+                toSchedule.push({
+                    id: notifId++,
+                    title,
+                    body: `${whenPrefix} ${baseBody}`,
+                    channelId: 'lumen_alerts_v1',
+                    schedule: { at: fireDate, allowWhileIdle: true },
+                    smallIcon: 'ic_launcher'
+                });
             });
         };
 
-        // A. Tarjetas de Crédito y Préstamos con ciclo pendiente (aviso X días antes del pago)
+        // A. Tarjetas de Crédito y Préstamos NO descontados por nómina
         (financeData.customAccounts || []).filter(a => (a.category === 'credit_card' || (a.category === 'debt' && !a.payrollDeduction)) && a.paymentDay).forEach(acc => {
             const bal = round2(currSnap.bals[acc.id] || 0);
             const nextDue = typeof getNextUnpaidLiabilityCycle === 'function'
@@ -10812,8 +10957,8 @@ window.syncNativeLocalNotifications = async () => {
                 : null;
             if (!nextDue || nextDue.amount <= 0) return;
 
-            const alertDate = new Date(nextDue.dueDate.getFullYear(), nextDue.dueDate.getMonth(), nextDue.dueDate.getDate());
-            alertDate.setDate(alertDate.getDate() - (prefs.daysBefore || 3));
+            const offsets = resolveItemOffsets(acc.notifRule);
+            if (offsets.length === 0) return;
 
             const cleanName = stripLeadingEmoji(acc.name);
             const isCard = acc.category === 'credit_card';
@@ -10822,20 +10967,26 @@ window.syncNativeLocalNotifications = async () => {
                 : `Cuota ${cleanName}`;
             const amtText = hideAmounts
                 ? 'Revisa el detalle en Lumen.'
-                : `${isCard ? 'Pago mín. estimado' : 'Cuota estimada'}: ${formatMoney(nextDue.amount)}.`;
-            addReminder(titleLabel, `Vence el ${nextDue.dueDate.getDate()} de ${getShortMonthLabel(nextDue.dueDate).toLowerCase()}. ${amtText}`, alertDate);
+                : `${isCard ? 'Pago mín. estimado' : 'Cuota'}: ${formatMoney(nextDue.amount)} (día ${nextDue.dueDate.getDate()}).`;
+            scheduleSeriesForDueDate(titleLabel, amtText, nextDue.dueDate, offsets);
         });
 
-        // B. Pagos recurrentes activos
+        // B. Pagos recurrentes / Servicios públicos activos
         (financeData.subscriptions || []).filter(s => s.status === 'active' && s.nextBillingDate).forEach(sub => {
+            const currMId = getMonthId(now);
+            if (sub.nextBillingDate.startsWith(currMId) && typeof isRecurringPaidInMonth === 'function' && isRecurringPaidInMonth(sub, currMId)) return;
             const [y, m, d] = sub.nextBillingDate.split('-').map(Number);
-            const alertDate = new Date(y, m - 1, d - (sub.reminderDays || 2));
+            if (!y || !m || !d) return;
+            const dueDt = new Date(y, m - 1, d);
+            const offsets = resolveItemOffsets(sub.notifRule);
+            if (offsets.length === 0) return;
+
             const amtCop = typeof getRecurringAmountInCOP === 'function' ? getRecurringAmountInCOP(sub) : round2(sub.amount);
-            const amtText = hideAmounts ? 'Cobro próximo programado.' : `Monto: ${formatMoney(amtCop)}.`;
-            addReminder(`Pago recurrente: ${stripLeadingEmoji(sub.name)}`, `Se cobra el ${sub.nextBillingDate}. ${amtText}`, alertDate);
+            const amtText = hideAmounts ? 'Cobro programado.' : `Valor: ${formatMoney(amtCop)}.`;
+            scheduleSeriesForDueDate(`Pago fijo: ${stripLeadingEmoji(sub.name)}`, amtText, dueDt, offsets);
         });
 
-        // B2. Cuota de manejo en cuentas bancarias (ahorros / corriente)
+        // B2. Cuota de manejo en cuentas bancarias
         if (typeof evaluateAccountMgmtFeeCycle === 'function') {
             const mNowId = getMonthId(now);
             const mNextId = getMonthId(new Date(now.getFullYear(), now.getMonth() + 1, 1));
@@ -10843,10 +10994,8 @@ window.syncNativeLocalNotifications = async () => {
                 [mNowId, mNextId].forEach(mId => {
                     const st = evaluateAccountMgmtFeeCycle(acc, mId, currSnap, now);
                     if (!st.enabled || st.status !== 'pending' || !st.dueDate) return;
-                    const alertDate = new Date(st.dueDate.getFullYear(), st.dueDate.getMonth(), st.dueDate.getDate());
-                    alertDate.setDate(alertDate.getDate() - (prefs.daysBefore || 2));
                     const amtText = hideAmounts ? 'Revisa el detalle en Lumen.' : `Valor: ${formatMoney(st.amount)}.`;
-                    addReminder(`Cuota de manejo: ${stripLeadingEmoji(acc.name)}`, `Cobro programado el día ${st.day}. ${amtText}`, alertDate);
+                    scheduleSeriesForDueDate(`Cuota de manejo: ${stripLeadingEmoji(acc.name)}`, amtText, st.dueDate, [2, 0]);
                 });
             });
         }
@@ -10858,8 +11007,8 @@ window.syncNativeLocalNotifications = async () => {
                 if (!t.status.estaVencido && t.status.fechaVencimiento) {
                     const [vy, vm, vd] = t.status.fechaVencimiento.split('-').map(Number);
                     const matDate = new Date(vy, vm - 1, vd);
-                    const amtText = hideAmounts ? 'Tu título cumple su plazo hoy.' : `Total neto a recibir: ${formatMoney(t.status.proyeccionTotal.totalAcumulado)}.`;
-                    addReminder(`Vencimiento ${t.tipo} ${t.entidad}`, amtText, matDate);
+                    const amtText = hideAmounts ? 'Tu título cumple su plazo.' : `Recibes neto: ${formatMoney(t.status.proyeccionTotal.totalAcumulado)}.`;
+                    scheduleSeriesForDueDate(`Vencimiento ${t.tipo} ${t.entidad}`, amtText, matDate, [3, 0]);
                 }
             });
         }

@@ -29,12 +29,64 @@
             visibility: hidden !important;
             pointer-events: none !important;
         }
-        @keyframes lumenSafeBootReveal { to { opacity: 1; } }
-        body:not(.lumen-ready) { opacity: 0; animation: lumenSafeBootReveal 0.01s linear 1.2s forwards; }
-        body.lumen-ready { opacity: 1; transition: opacity 0.18s ease-out; }
         #welcome-view:not(.hidden) ~ #auth-boot-loader,
         #login-view:not(.hidden) ~ #auth-boot-loader {
             display: none !important;
+        }
+        #lumen-splash-screen {
+            position: fixed;
+            inset: 0;
+            z-index: 9995;
+            background: radial-gradient(circle at 50% 42%, rgba(0, 196, 159, 0.14) 0%, rgba(0, 51, 170, 0.10) 34%, #0B0F19 72%);
+            background-color: #0B0F19;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: env(safe-area-inset-top, 0px) 24px env(safe-area-inset-bottom, 0px) 24px;
+            transition: opacity 0.34s cubic-bezier(0.22, 1, 0.36, 1), transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), visibility 0.34s;
+        }
+        #lumen-splash-screen.splash-hide {
+            opacity: 0 !important;
+            transform: scale(1.035);
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
+        @keyframes lumenStrokeDraw {
+            0% { stroke-dashoffset: 100; opacity: 0.3; }
+            15% { opacity: 1; }
+            100% { stroke-dashoffset: 0; opacity: 1; }
+        }
+        @keyframes lumenDotPop {
+            0% { transform: scale(0); opacity: 0; }
+            65% { transform: scale(1.28); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes lumenWordReveal {
+            0% { opacity: 0; transform: translateY(8px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+        #lumen-splash-path {
+            stroke-dasharray: 100;
+            stroke-dashoffset: 100;
+            animation: lumenStrokeDraw 0.68s cubic-bezier(0.65, 0, 0.35, 1) 0.06s forwards;
+        }
+        #lumen-splash-dot {
+            transform-origin: center;
+            transform-box: fill-box;
+            opacity: 0;
+            animation: lumenDotPop 0.38s cubic-bezier(0.34, 1.56, 0.64, 1) 0.58s forwards;
+        }
+        .lumen-splash-wordmark {
+            opacity: 0;
+            animation: lumenWordReveal 0.42s cubic-bezier(0.22, 1, 0.36, 1) 0.38s forwards;
+        }
+        .lumen-splash-footer {
+            position: absolute;
+            bottom: calc(26px + env(safe-area-inset-bottom, 0px));
+            opacity: 0;
+            animation: lumenWordReveal 0.42s ease-out 0.52s forwards;
+            text-align: center;
         }
     </style>
     <script src="demo-data.js?v=2.2.11"></script>
@@ -42,6 +94,34 @@
     <script src="security.js?v=2.2.11"></script>
 </head>
 <body class="app-locked">
+    <!-- SPLASH ANIMADO DE APERTURA (ESTILO FINTECH NATIVO) -->
+    <div id="lumen-splash-screen" aria-hidden="true">
+        <div style="display:flex; flex-direction:column; align-items:center; gap:16px;">
+            <div style="width:88px; height:88px; border-radius:26px; background:rgba(255,255,255,0.035); border:1px solid rgba(255,255,255,0.08); box-shadow:0 18px 42px rgba(0, 196, 159, 0.16); display:flex; align-items:center; justify-content:center;">
+                <svg width="58" height="58" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="lumenSplashGrad" x1="15%" y1="10%" x2="85%" y2="90%">
+                            <stop offset="0%" stop-color="#00C49F"/>
+                            <stop offset="52%" stop-color="#06B6D4"/>
+                            <stop offset="100%" stop-color="#3B82F6"/>
+                        </linearGradient>
+                    </defs>
+                    <path id="lumen-splash-path" pathLength="100" d="M 48 74 L 48 24 A 10 10 0 0 0 28 24 L 28 54 A 12 12 0 0 0 40 66 L 76 66 A 10 10 0 0 1 76 86 L 60 86 A 12 12 0 0 1 48 74 Z" stroke="url(#lumenSplashGrad)" stroke-width="9.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <circle id="lumen-splash-dot" cx="76" cy="40" r="6.5" fill="#00C49F"/>
+                </svg>
+            </div>
+            <div class="lumen-splash-wordmark" style="text-align:center;">
+                <strong style="display:block; font-size:28px; font-weight:800; color:#F8FAFC; letter-spacing:-0.8px; line-height:1.05;">Lumen</strong>
+            </div>
+        </div>
+        <div class="lumen-splash-footer">
+            <span style="display:inline-flex; align-items:center; gap:6px; font-size:10.5px; font-weight:700; letter-spacing:1.2px; text-transform:uppercase; color:rgba(148, 163, 184, 0.82);">
+                <span style="width:6px; height:6px; border-radius:50%; background:#00C49F;"></span>
+                <span>Función IF • 100% Local</span>
+            </span>
+        </div>
+    </div>
+
     <!-- TOAST DE ACTUALIZACIÓN PWA -->
     <div id="sw-update-toast" class="sw-toast hidden">
         <svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px; height:16px; margin-right:8px;"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
@@ -5464,14 +5544,45 @@
                             <small id="pref-month-start-hint" style="display:block; font-size:10.5px; color:var(--text-muted); margin-top:4px;"></small>
                         </div>
 
-                        <div class="form-row" style="margin-bottom:0; gap:8px;">
+                        <div class="switch-row" style="margin-bottom:10px; background:var(--card-bg);">
+                            <div>
+                                <strong>Notificaciones en el celular</strong>
+                                <small>Avisos nativos en Android (apágalo si no deseas interrupciones)</small>
+                            </div>
+                            <label class="switch"><input type="checkbox" id="notif-push-enabled" checked><span class="slider"></span></label>
+                        </div>
+
+                        <div class="switch-row" style="margin-bottom:10px; background:var(--card-bg);">
+                            <div>
+                                <strong>Sonido al registrar movimientos</strong>
+                                <small>Tono sutil exclusivo al guardar ingresos, gastos o transferencias</small>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <button type="button" id="btn-test-tx-sound" class="mini-action-btn" style="padding:4px 8px; font-size:10.5px;">Probar</button>
+                                <label class="switch"><input type="checkbox" id="pref-tx-sound-enabled" checked><span class="slider"></span></label>
+                            </div>
+                        </div>
+
+                        <div class="form-row" style="margin-bottom:10px; gap:8px;">
                             <div class="form-group" style="margin-bottom:0 !important;">
-                                <label style="font-size:10.5px;">Aviso Tarjetas (Días)</label>
-                                <input type="number" id="notif-days-before" min="1" max="15" value="5">
+                                <label style="font-size:10.5px;">Hora del aviso</label>
+                                <input type="time" id="notif-fire-time" value="08:00">
                             </div>
                             <div class="form-group" style="margin-bottom:0 !important;">
                                 <label style="font-size:10.5px;">Alerta Presup. (%)</label>
                                 <input type="number" id="notif-budget-pct" min="50" max="100" value="85">
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom:0 !important;">
+                            <label style="font-size:10.5px;">¿Cuántos días antes notificarte? (puedes elegir varios)</label>
+                            <input type="hidden" id="notif-days-before" value="5">
+                            <div id="notif-multi-days-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;">
+                                <button type="button" class="pill-btn" data-nday="10" style="font-size:11px; padding:5px 10px;">10 días</button>
+                                <button type="button" class="pill-btn active" data-nday="5" style="font-size:11px; padding:5px 10px;">5 días</button>
+                                <button type="button" class="pill-btn" data-nday="2" style="font-size:11px; padding:5px 10px;">2 días</button>
+                                <button type="button" class="pill-btn active" data-nday="1" style="font-size:11px; padding:5px 10px;">1 día</button>
+                                <button type="button" class="pill-btn active" data-nday="0" style="font-size:11px; padding:5px 10px;">El mismo día</button>
                             </div>
                         </div>
                     </div>

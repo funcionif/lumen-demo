@@ -387,7 +387,7 @@ body.app-locked {
     width: 100%;
     height: 100%;
 }
-body.app-locked > *:not(#auth-overlay):not(#universal-info-modal):not(#sw-update-toast):not(#bento-confirm-modal):not(#bento-alert-modal):not(#reset-app-confirm-modal):not(#recovery-success-modal) {
+body.app-locked > *:not(#lumen-splash-screen):not(#auth-overlay):not(#universal-info-modal):not(#sw-update-toast):not(#bento-confirm-modal):not(#bento-alert-modal):not(#reset-app-confirm-modal):not(#recovery-success-modal) {
     visibility: hidden !important;
     opacity: 0 !important;
     pointer-events: none !important;
@@ -406,8 +406,21 @@ body.app-bg-shield::before {
     position: fixed;
     inset: 0;
     z-index: 99999;
-    background-color: var(--bg-base);
+    background: #0B0F19 url('./icon.png') no-repeat center center / 76px 76px;
     pointer-events: all;
+}
+body.no-animations #lumen-splash-path {
+    stroke-dashoffset: 0 !important;
+    opacity: 1 !important;
+}
+body.no-animations #lumen-splash-dot,
+body.no-animations .lumen-splash-wordmark,
+body.no-animations .lumen-splash-footer {
+    opacity: 1 !important;
+    transform: none !important;
+}
+@media print {
+    #lumen-splash-screen { display: none !important; }
 }
 body.app-bg-shield > * {
     visibility: hidden !important;
