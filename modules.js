@@ -3256,6 +3256,7 @@ document.getElementById('new-debt-form')?.addEventListener('submit', (e) => {
         academicPeriod: debtType === 'education' ? academicPeriod : '',
         cutoffDay,
         paymentDay,
+        notifRule: document.getElementById('new-debt-notif-rule')?.value || 'default',
         ...(initialSettledCycles ? { settledCycles: initialSettledCycles } : {}),
         extraFees: debtType === 'education' ? [] : undefined
     });
@@ -4637,10 +4638,22 @@ const ensureDebtBillingCycleInputs = () => {
     if (newPayrollRow && !document.getElementById('new-debt-billing-cycle-row')) {
         const group = document.createElement('div');
         group.id = 'new-debt-billing-cycle-row';
-        group.className = 'form-group';
+        group.className = 'form-row';
         group.innerHTML = `
-            <label>Día de Corte (1-31 • Opcional)</label>
-            <input type="number" id="new-debt-cycle-cut-day" min="1" max="31" placeholder="Ej. 15 (si maneja corte mensual)">
+            <div class="form-group">
+                <label>Día de Corte (Opc.)</label>
+                <input type="number" id="new-debt-cycle-cut-day" min="1" max="31" placeholder="Ej. 15">
+            </div>
+            <div class="form-group">
+                <label>Notificarme antes</label>
+                <select id="new-debt-notif-rule">
+                    <option value="default">Automático (según Perfil)</option>
+                    <option value="10,5,1,0">10, 5, 1d antes y el día</option>
+                    <option value="5,2,0">5, 2d antes y el día</option>
+                    <option value="1,0">1d antes y el día</option>
+                    <option value="off">No notificar este crédito</option>
+                </select>
+            </div>
         `;
         newPayrollRow.insertAdjacentElement('beforebegin', group);
     }
@@ -15019,12 +15032,22 @@ const toggleLiquidityHint = (checkboxId, hintId) => {
 
 document.getElementById('notifications-config-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
+    const selectedOffsets = Array.from(document.querySelectorAll('#notif-multi-days-chips [data-nday].active'))
+        .map(el => parseInt(el.getAttribute('data-nday'), 10))
+        .filter(n => !Number.isNaN(n))
+        .sort((a, b) => b - a);
+    const maxLeadDay = selectedOffsets.length > 0 ? Math.max(...selectedOffsets, 1) : 5;
+
     financeData.notificationPrefs = {
-        daysBefore: parseInt(document.getElementById('notif-days-before').value, 10) || 5,
+        pushEnabled: document.getElementById('notif-push-enabled') ? !!document.getElementById('notif-push-enabled').checked : true,
+        fireTime: document.getElementById('notif-fire-time')?.value || '08:00',
+        reminderOffsets: selectedOffsets.length > 0 ? selectedOffsets : [5, 1, 0],
+        daysBefore: maxLeadDay,
         budgetPct: parseInt(document.getElementById('notif-budget-pct').value, 10) || 85,
         pendingEnabled: !!document.getElementById('notif-pending-enabled')?.checked
     };
     if (!financeData.preferences) financeData.preferences = {};
+    financeData.preferences.txSoundEnabled = document.getElementById('pref-tx-sound-enabled') ? !!document.getElementById('pref-tx-sound-enabled').checked : true;
     financeData.preferences.showProjections = !!document.getElementById('pref-show-projections')?.checked;
     financeData.preferences.rememberAccount = !!document.getElementById('pref-remember-account')?.checked;
     financeData.preferences.rememberCategory = !!document.getElementById('pref-remember-category')?.checked;
@@ -16689,9 +16712,15 @@ window.openBentoConfirmModal = ({
     });
 
     searchInput?.addEventListener('input', (e) => renderPickerOptions(e.target.value));
-    document.getElementById('close-bento-picker-btn')?.addEventListener('click', closeBentoPicker);
+    document.getElementById('close-bento-picker-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeBentoPicker();
+    });
     pickerModal.addEventListener('click', (e) => {
-        if (e.target === pickerModal) closeBentoPicker();
+        if (e.target === pickerModal) {
+            e.stopPropagation();
+            closeBentoPicker();
+        }
     });
 })();
 // ==========================================
@@ -16881,9 +16910,15 @@ window.openBentoConfirmModal = ({
     window.openBentoMonthPicker = openMonthPicker;
 
     clearBtn?.addEventListener('click', () => applyMonthValue(''));
-    document.getElementById('close-bento-month-picker-btn')?.addEventListener('click', closeMonthPicker);
+    document.getElementById('close-bento-month-picker-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeMonthPicker();
+    });
     monthModal.addEventListener('click', (e) => {
-        if (e.target === monthModal) closeMonthPicker();
+        if (e.target === monthModal) {
+            e.stopPropagation();
+            closeMonthPicker();
+        }
     });
 })();
 // ============================================================

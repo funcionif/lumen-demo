@@ -2314,9 +2314,14 @@ document.addEventListener('click', async (e) => {
         return;
     }
 
-    // 1. Cierre unificado de modales
-    if (e.target.closest('.btn-close-modal') || e.target.id === 'universal-info-modal') {
+    // 1. Cierre unificado de modales (respeta sub-modales ya cerrados por su propio control)
+    const closeBtnTarget = e.target.closest('.btn-close-modal');
+    if (closeBtnTarget || e.target.id === 'universal-info-modal') {
         e.stopPropagation();
+        const ownerModal = closeBtnTarget?.closest('.modal');
+        if (ownerModal && ownerModal.classList.contains('hidden')) {
+            return;
+        }
         attemptCloseModals();
         return;
     }
