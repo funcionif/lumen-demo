@@ -2988,6 +2988,16 @@ const renderSmartAlerts = (monthId, snap) => {
     const dismissedList = Array.isArray(financeData.dismissedAlerts) ? financeData.dismissedAlerts : [];
     const activeAlerts = alerts.filter(al => !dismissedList.includes(al.id));
 
+    // Actualizar globo numérico en el ícono (PWA iOS 16.4+ / Web / Desktop)
+    const badgeCount = prefs.pushEnabled === false ? 0 : activeAlerts.length;
+    if (typeof navigator !== 'undefined' && typeof navigator.setAppBadge === 'function') {
+        if (badgeCount > 0) {
+            navigator.setAppBadge(badgeCount).catch(() => {});
+        } else if (typeof navigator.clearAppBadge === 'function') {
+            navigator.clearAppBadge().catch(() => {});
+        }
+    }
+
     if (activeAlerts.length === 0) {
         container.classList.add('hidden');
         container.innerHTML = '';

@@ -15053,6 +15053,12 @@ document.getElementById('notifications-config-form')?.addEventListener('submit',
     financeData.preferences.rememberCategory = !!document.getElementById('pref-remember-category')?.checked;
     
     localStorage.setItem('myFinances', JSON.stringify(financeData));
+    if (financeData.notificationPrefs?.pushEnabled !== false
+        && !window.Capacitor?.isNativePlatform?.()
+        && typeof Notification !== 'undefined'
+        && Notification.permission === 'default') {
+        Notification.requestPermission().then(() => updateDashboard()).catch(() => {});
+    }
     hasUnsavedChanges = false; 
     alert('Preferencias de alertas guardadas.');
     updateDashboard();
